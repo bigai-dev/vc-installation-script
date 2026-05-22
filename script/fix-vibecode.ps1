@@ -366,6 +366,230 @@ function Install-Node {
 
 Install-Node
 
+# ---------- Find and fix Git ----------
+Step "Checking Git"
+Refresh-Path
+
+function Install-Git {
+    $gitCmd = Get-Command git -ErrorAction SilentlyContinue
+    if ($gitCmd) {
+        $gv = (& git --version 2>&1).Trim()
+        OK "$gv  ($($gitCmd.Source))"
+        Set-Result -Tool 'git' -Status 'AlreadyInstalled' -Version ($gv -replace '^git version\s+','') -Path $gitCmd.Source
+    } else {
+        if ($DiagnoseOnly) {
+            Warn "git not found. Would install via winget."
+            Set-Result -Tool 'git' -Status 'Skipped' -Notes "Would install Git via winget"
+            return
+        }
+        Info "Installing Git via winget..."
+        & winget install -e --id Git.Git --silent --accept-package-agreements --accept-source-agreements | Out-Host
+        if ($LASTEXITCODE -ne 0) {
+            Fail "winget install of Git failed (exit code $LASTEXITCODE)"
+            Set-Result -Tool 'git' -Status 'Failed' -Notes "winget exit $LASTEXITCODE"
+            return
+        }
+        Refresh-Path
+        $gitCmd = Get-Command git -ErrorAction SilentlyContinue
+        if ($gitCmd) {
+            $gv = (& git --version 2>&1).Trim()
+            OK "Git installed: $gv"
+            Set-Result -Tool 'git' -Status 'Installed' -Version ($gv -replace '^git version\s+','') -Path $gitCmd.Source
+        } else {
+            Fail "Git install reported success but git not on PATH"
+            Set-Result -Tool 'git' -Status 'Failed' -Notes "Post-install search failed"
+            return
+        }
+    }
+
+    # Configure user.name / user.email if missing
+    if (-not $DiagnoseOnly) {
+        $existingName  = (& git config --global user.name 2>$null)
+        $existingEmail = (& git config --global user.email 2>$null)
+        if ([string]::IsNullOrWhiteSpace($existingName) -or [string]::IsNullOrWhiteSpace($existingEmail)) {
+            Info "Git needs your name and email for commits (one-time setup)."
+            try {
+                if ([string]::IsNullOrWhiteSpace($existingName)) {
+                    $name = Read-Host "  Your full name (e.g. Jay Tan)"
+                    if (-not [string]::IsNullOrWhiteSpace($name)) {
+                        & git config --global user.name $name.Trim()
+                        OK "git user.name set"
+                    } else {
+                        Warn "Skipped: no name entered. Run 'git config --global user.name `"Your Name`"' later."
+                    }
+                }
+                if ([string]::IsNullOrWhiteSpace($existingEmail)) {
+                    $email = Read-Host "  Your email (your gmail address)"
+                    if (-not [string]::IsNullOrWhiteSpace($email)) {
+                        & git config --global user.email $email.Trim()
+                        OK "git user.email set"
+                    } else {
+                        Warn "Skipped: no email entered. Run 'git config --global user.email `"you@gmail.com`"' later."
+                    }
+                }
+            } catch {
+                Warn "Git config prompt was cancelled or failed: $($_.Exception.Message)"
+                Info "You can set these later:"
+                Info "  git config --global user.name `"Your Name`""
+                Info "  git config --global user.email `"you@gmail.com`""
+            }
+        } else {
+            OK "git user.name = $existingName"
+            OK "git user.email = $existingEmail"
+        }
+    }
+}
+
+Install-Git
+
+# ---------- Find and install GitHub CLI ----------
+Step "Checking GitHub CLI (gh)"
+Refresh-Path
+
+function Install-GitHubCLI {
+    $ghCmd = Get-Command gh -ErrorAction SilentlyContinue
+    if ($ghCmd) {
+        try {
+            $ghv = (& gh --version 2>&1 | Select-Object -First 1).Trim()
+            OK "$ghv  ($($ghCmd.Source))"
+            $verOnly = $ghv -replace '^gh version\s+(\S+).*','$1'
+            Set-Result -Tool 'gh' -Status 'AlreadyInstalled' -Version $verOnly -Path $ghCmd.Source
+        } catch {
+            Warn "gh found but --version failed: $_"
+            Set-Result -Tool 'gh' -Status 'Failed' -Path $ghCmd.Source -Notes $_.Exception.Message
+        }
+        return
+    }
+
+    if ($DiagnoseOnly) {
+        Warn "gh not found. Would install via winget."
+        Set-Result -Tool 'gh' -Status 'Skipped' -Notes "Would install GitHub CLI via winget"
+        return
+    }
+
+    Info "Installing GitHub CLI via winget..."
+    & winget install -e --id GitHub.cli --silent --accept-package-agreements --accept-source-agreements | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+        Fail "winget install of gh failed (exit code $LASTEXITCODE)"
+        Set-Result -Tool 'gh' -Status 'Failed' -Notes "winget exit $LASTEXITCODE"
+        return
+    }
+    Refresh-Path
+    $ghCmd = Get-Command gh -ErrorAction SilentlyContinue
+    if ($ghCmd) {
+        $ghv = (& gh --version 2>&1 | Select-Object -First 1).Trim()
+        OK "GitHub CLI installed: $ghv"
+        Set-Result -Tool 'gh' -Status 'Installed' -Version ($ghv -replace '^gh version\s+(\S+).*','$1') -Path $ghCmd.Source
+    } else {
+        Fail "gh install reported success but gh not on PATH"
+        Set-Result -Tool 'gh' -Status 'Failed' -Notes "Post-install search failed"
+    }
+}
+
+Install-GitHubCLI
+
+# ---------- Find and install Supabase CLI ----------
+Step "Checking Supabase CLI"
+Refresh-Path
+
+function Install-SupabaseCLI {
+    $sbCmd = Get-Command supabase -ErrorAction SilentlyContinue
+    if ($sbCmd) {
+        try {
+            $sbv = (& supabase --version 2>&1).Trim()
+            OK "supabase $sbv  ($($sbCmd.Source))"
+            Set-Result -Tool 'supabase' -Status 'AlreadyInstalled' -Version $sbv -Path $sbCmd.Source
+        } catch {
+            Warn "supabase found but --version failed: $_"
+            Set-Result -Tool 'supabase' -Status 'Failed' -Path $sbCmd.Source -Notes $_.Exception.Message
+        }
+        return
+    }
+
+    if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
+        Warn "npm not available - cannot install Supabase CLI. Make sure Node was installed first."
+        Set-Result -Tool 'supabase' -Status 'Failed' -Notes "npm not available"
+        return
+    }
+
+    if ($DiagnoseOnly) {
+        Warn "supabase not found. Would install via npm."
+        Set-Result -Tool 'supabase' -Status 'Skipped' -Notes "Would install Supabase CLI via npm"
+        return
+    }
+
+    Info "Installing Supabase CLI via npm install -g supabase..."
+    & npm install -g supabase 2>&1 | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+        Fail "npm install -g supabase failed (exit code $LASTEXITCODE)"
+        Set-Result -Tool 'supabase' -Status 'Failed' -Notes "npm exit $LASTEXITCODE"
+        return
+    }
+    Refresh-Path
+    $sbCmd = Get-Command supabase -ErrorAction SilentlyContinue
+    if ($sbCmd) {
+        $sbv = (& supabase --version 2>&1).Trim()
+        OK "Supabase CLI installed: $sbv"
+        Set-Result -Tool 'supabase' -Status 'Installed' -Version $sbv -Path $sbCmd.Source
+    } else {
+        Fail "Supabase install reported success but supabase not on PATH"
+        Set-Result -Tool 'supabase' -Status 'Failed' -Notes "Post-install search failed"
+    }
+}
+
+Install-SupabaseCLI
+
+# ---------- Find and install Vercel CLI ----------
+Step "Checking Vercel CLI"
+Refresh-Path
+
+function Install-VercelCLI {
+    $vcCmd = Get-Command vercel -ErrorAction SilentlyContinue
+    if ($vcCmd) {
+        try {
+            $vcv = (& vercel --version 2>&1).Trim()
+            OK "vercel $vcv  ($($vcCmd.Source))"
+            Set-Result -Tool 'vercel' -Status 'AlreadyInstalled' -Version $vcv -Path $vcCmd.Source
+        } catch {
+            Warn "vercel found but --version failed: $_"
+            Set-Result -Tool 'vercel' -Status 'Failed' -Path $vcCmd.Source -Notes $_.Exception.Message
+        }
+        return
+    }
+
+    if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
+        Warn "npm not available - cannot install Vercel CLI."
+        Set-Result -Tool 'vercel' -Status 'Failed' -Notes "npm not available"
+        return
+    }
+
+    if ($DiagnoseOnly) {
+        Warn "vercel not found. Would install via npm."
+        Set-Result -Tool 'vercel' -Status 'Skipped' -Notes "Would install Vercel CLI via npm"
+        return
+    }
+
+    Info "Installing Vercel CLI via npm install -g vercel..."
+    & npm install -g vercel 2>&1 | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+        Fail "npm install -g vercel failed (exit code $LASTEXITCODE)"
+        Set-Result -Tool 'vercel' -Status 'Failed' -Notes "npm exit $LASTEXITCODE"
+        return
+    }
+    Refresh-Path
+    $vcCmd = Get-Command vercel -ErrorAction SilentlyContinue
+    if ($vcCmd) {
+        $vcv = (& vercel --version 2>&1).Trim()
+        OK "Vercel CLI installed: $vcv"
+        Set-Result -Tool 'vercel' -Status 'Installed' -Version $vcv -Path $vcCmd.Source
+    } else {
+        Fail "Vercel install reported success but vercel not on PATH"
+        Set-Result -Tool 'vercel' -Status 'Failed' -Notes "Post-install search failed"
+    }
+}
+
+Install-VercelCLI
+
 # ---------- Install Claude Code ----------
 if (-not $SkipClaudeCode -and -not $DiagnoseOnly) {
     Step "Installing Claude Code"
