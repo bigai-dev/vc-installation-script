@@ -107,6 +107,26 @@ function Refresh-Path {
     )
 }
 
+# ---------- Preflight: check winget is available ----------
+Step "Checking winget availability"
+$wingetCmd = Get-Command winget -ErrorAction SilentlyContinue
+if (-not $wingetCmd) {
+    Fail "winget is not installed."
+    Info "Install 'App Installer' from the Microsoft Store, then re-run this script:"
+    Info "  https://apps.microsoft.com/detail/9NBLGGH4NNS1"
+    Info ""
+    Info "After install, close PowerShell, open a fresh window, and run this script again."
+    if ($script:LogPath) { try { Stop-Transcript | Out-Null } catch { } }
+    exit 2
+} else {
+    try {
+        $wv = (& winget --version) 2>&1
+        OK "winget $wv"
+    } catch {
+        Warn "winget found but did not respond to --version: $_"
+    }
+}
+
 # ---------- Back up PATH ----------
 Step "Backing up your current PATH"
 $backupDir = "$env:USERPROFILE\path-backups"
