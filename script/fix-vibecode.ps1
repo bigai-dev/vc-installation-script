@@ -42,6 +42,19 @@ param(
 $ErrorActionPreference = "Continue"
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
+# --- Session log (only in fix mode; transcript adds noise to diagnose output) ---
+$script:LogPath = $null
+if (-not $DiagnoseOnly) {
+    $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+    $script:LogPath = Join-Path $env:TEMP "fix-vibecode-$stamp.log"
+    try {
+        Start-Transcript -Path $script:LogPath -Force | Out-Null
+    } catch {
+        Write-Host "Could not start transcript: $($_.Exception.Message)" -ForegroundColor Yellow
+        $script:LogPath = $null
+    }
+}
+
 # ---------- Output helpers ----------
 function Say($msg, $color = "White") { Write-Host $msg -ForegroundColor $color }
 function Step($msg)  { Write-Host ""; Write-Host "==> $msg" -ForegroundColor Cyan }
@@ -347,3 +360,9 @@ if ($DiagnoseOnly) {
 Say "  PATH backups saved in: $backupDir" Gray
 Say "=================================================================" Cyan
 Write-Host ""
+
+# --- Stop transcript ---
+if ($script:LogPath) {
+    try { Stop-Transcript | Out-Null } catch { }
+    Write-Host "Session log: $($script:LogPath)" -ForegroundColor Gray
+}
