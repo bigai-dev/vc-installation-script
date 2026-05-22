@@ -598,10 +598,12 @@ if (-not $SkipClaudeCode -and -not $DiagnoseOnly) {
     $existing = Get-Command claude -ErrorAction SilentlyContinue
     if ($existing) {
         try {
-            $cv = & claude --version 2>&1
+            $cv = (& claude --version 2>&1).Trim()
             OK "Claude Code already installed: $cv  ($($existing.Source))"
+            Set-Result -Tool 'claude' -Status 'AlreadyInstalled' -Version $cv -Path $existing.Source
         } catch {
             Warn "claude on PATH but doesn't run cleanly: $_"
+            Set-Result -Tool 'claude' -Status 'Failed' -Path $existing.Source -Notes $_.Exception.Message
         }
     } else {
         $installed = $false
@@ -609,16 +611,16 @@ if (-not $SkipClaudeCode -and -not $DiagnoseOnly) {
         # Method 1: Anthropic's native Windows installer (bundles its own runtime, no Node needed)
         Info "Trying official native installer..."
         try {
-            $script = Invoke-RestMethod -Uri "https://claude.ai/install.ps1" -UseBasicParsing
-            Invoke-Expression $script
+            $installScript = Invoke-RestMethod -Uri "https://claude.ai/install.ps1" -UseBasicParsing
+            Invoke-Expression $installScript
             $installed = $true
             OK "Claude Code installed via native installer"
         } catch {
             Warn "Native installer failed: $($_.Exception.Message)"
         }
 
-        # Method 2: npm fallback
-        if (-not $installed -and $nodeExe) {
+        # Method 2: npm fallback (requires npm available, which it should be after Install-Node)
+        if (-not $installed -and (Get-Command npm -ErrorAction SilentlyContinue)) {
             Info "Falling back to npm install -g @anthropic-ai/claude-code"
             try {
                 & npm install -g "@anthropic-ai/claude-code" 2>&1 | Out-Host
@@ -644,8 +646,37 @@ if (-not $SkipClaudeCode -and -not $DiagnoseOnly) {
             if ($claudeFound) {
                 $cdir = Split-Path $claudeFound -Parent
                 Add-UserPathEntry $cdir | Out-Null
+                Refresh-Path
                 OK "Claude Code binary: $claudeFound"
+                try {
+                    $cv = (& claude --version 2>&1).Trim()
+                    Set-Result -Tool 'claude' -Status 'Installed' -Version $cv -Path $claudeFound
+                } catch {
+                    Set-Result -Tool 'claude' -Status 'Installed' -Path $claudeFound -Notes "Installed but --version failed: $_"
+                }
+            } else {
+                Set-Result -Tool 'claude' -Status 'Failed' -Notes "Install reported success but binary not found in known locations"
             }
+        } else {
+            Set-Result -Tool 'claude' -Status 'Failed' -Notes "All install methods failed"
+        }
+    }
+}
+
+if (-not $script:results.Contains('claude')) {
+    if ($SkipClaudeCode) {
+        Set-Result -Tool 'claude' -Status 'Skipped' -Notes "Skipped via -SkipClaudeCode flag"
+    } elseif ($DiagnoseOnly) {
+        $existing = Get-Command claude -ErrorAction SilentlyContinue
+        if ($existing) {
+            try {
+                $cv = (& claude --version 2>&1).Trim()
+                Set-Result -Tool 'claude' -Status 'AlreadyInstalled' -Version $cv -Path $existing.Source
+            } catch {
+                Set-Result -Tool 'claude' -Status 'Failed' -Path $existing.Source -Notes "Found but --version failed"
+            }
+        } else {
+            Set-Result -Tool 'claude' -Status 'Skipped' -Notes "Would install via native installer or npm"
         }
     }
 }
