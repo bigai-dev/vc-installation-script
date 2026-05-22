@@ -25,4 +25,28 @@ function Is-WindowsAppsStub {
     return $Path -match '\\WindowsApps\\[^\\]+\.exe$'
 }
 
-Export-ModuleMember -Function Compare-Version, Is-WindowsAppsStub
+function Get-CleanedPath {
+    param([string[]]$Entries)
+    $cleaned = @()
+    $seen = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    $broken = 0
+    $dups = 0
+    foreach ($e in $Entries) {
+        if ([string]::IsNullOrWhiteSpace($e)) { continue }
+        $trimmed = $e.Trim()
+        if (-not $seen.Add($trimmed)) { $dups++; continue }
+        $expanded = [Environment]::ExpandEnvironmentVariables($trimmed)
+        if ($trimmed -match '%[^%]+%' -or (Test-Path -LiteralPath $expanded -ErrorAction SilentlyContinue)) {
+            $cleaned += $trimmed
+        } else {
+            $broken++
+        }
+    }
+    return [PSCustomObject]@{
+        Entries           = $cleaned
+        BrokenRemoved     = $broken
+        DuplicatesRemoved = $dups
+    }
+}
+
+Export-ModuleMember -Function Compare-Version, Is-WindowsAppsStub, Get-CleanedPath
