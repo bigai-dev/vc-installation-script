@@ -19,4 +19,10 @@ function Compare-Version {
     return 0
 }
 
-Export-ModuleMember -Function Compare-Version
+function Is-WindowsAppsStub {
+    param([string]$Path)
+    if ([string]::IsNullOrEmpty($Path)) { return $false }
+    return $Path -match '\\WindowsApps\\[^\\]+\.exe$'
+}
+
+Export-ModuleMember -Function Compare-Version, Is-WindowsAppsStub
