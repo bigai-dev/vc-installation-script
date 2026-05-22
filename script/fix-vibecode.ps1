@@ -681,20 +681,64 @@ if (-not $script:results.Contains('claude')) {
     }
 }
 
-# ---------- Final verification ----------
-Step "Final check"
+# ---------- Final verification (renders $script:results) ----------
+Step "Final verification"
 Refresh-Path
-$tools = @("python","node","npm")
-if (-not $SkipClaudeCode) { $tools += "claude" }
 
-$allGood = $true
-foreach ($t in $tools) {
-    $cmd = Get-Command $t -ErrorAction SilentlyContinue
-    if ($cmd -and $cmd.Source -notmatch "WindowsApps\\$t\.exe$") {
-        OK "$t -> $($cmd.Source)"
+# Re-verify every tool with --version one more time (catches PATH drift edge cases)
+$reverify = [ordered]@{
+    python   = 'python --version'
+    node     = 'node --version'
+    npm      = 'npm --version'
+    git      = 'git --version'
+    gh       = 'gh --version'
+    supabase = 'supabase --version'
+    vercel   = 'vercel --version'
+}
+if (-not $SkipClaudeCode) { $reverify['claude'] = 'claude --version' }
+
+foreach ($tool in $reverify.Keys) {
+    $cmd = Get-Command $tool -ErrorAction SilentlyContinue
+    if ($cmd -and $cmd.Source -notmatch '\\WindowsApps\\') {
+        try {
+            $v = (& $tool --version 2>&1 | Select-Object -First 1).Trim()
+            # Only update if we don't already have a richer entry
+            if (-not $script:results.Contains($tool)) {
+                Set-Result -Tool $tool -Status 'AlreadyInstalled' -Version $v -Path $cmd.Source
+            }
+        } catch {
+            if (-not $script:results.Contains($tool)) {
+                Set-Result -Tool $tool -Status 'Failed' -Path $cmd.Source -Notes "$_"
+            }
+        }
     } else {
-        Warn "$t still not resolvable in THIS shell (probably fine in a fresh one)"
-        $allGood = $false
+        if (-not $script:results.Contains($tool)) {
+            Set-Result -Tool $tool -Status 'Failed' -Notes "Not on PATH in this shell"
+        }
+    }
+}
+
+# Render the table
+Write-Host ""
+Say "  Tool        Status              Version                 Path" Cyan
+Say "  ----------- ------------------- ----------------------- --------------------------------------------------" Cyan
+$allGood = $true
+foreach ($r in $script:results.Values) {
+    $statusColor = switch ($r.Status) {
+        'Installed'        { 'Green' }
+        'AlreadyInstalled' { 'Green' }
+        'PathFixed'        { 'Green' }
+        'Skipped'          { 'Yellow' }
+        'Failed'           { 'Red' }
+        default            { 'Gray' }
+    }
+    if ($r.Status -eq 'Failed') { $allGood = $false }
+    $verStr  = if ($r.Version) { $r.Version } else { '' }
+    $pathStr = if ($r.Path)    { $r.Path }    else { '' }
+    $line = "  {0,-11} {1,-19} {2,-23} {3}" -f $r.Tool, $r.Status, $verStr, $pathStr
+    Write-Host $line -ForegroundColor $statusColor
+    if ($r.Notes) {
+        Write-Host "              note: $($r.Notes)" -ForegroundColor Gray
     }
 }
 
