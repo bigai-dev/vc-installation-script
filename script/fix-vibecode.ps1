@@ -686,18 +686,10 @@ Step "Final verification"
 Refresh-Path
 
 # Re-verify every tool with --version one more time (catches PATH drift edge cases)
-$reverify = [ordered]@{
-    python   = 'python --version'
-    node     = 'node --version'
-    npm      = 'npm --version'
-    git      = 'git --version'
-    gh       = 'gh --version'
-    supabase = 'supabase --version'
-    vercel   = 'vercel --version'
-}
-if (-not $SkipClaudeCode) { $reverify['claude'] = 'claude --version' }
+$reverify = @('python','node','npm','git','gh','supabase','vercel')
+if (-not $SkipClaudeCode) { $reverify += 'claude' }
 
-foreach ($tool in $reverify.Keys) {
+foreach ($tool in $reverify) {
     $cmd = Get-Command $tool -ErrorAction SilentlyContinue
     if ($cmd -and $cmd.Source -notmatch '\\WindowsApps\\') {
         try {
