@@ -314,7 +314,7 @@ function Install-Python {
     }
 
     Info "Installing Python 3.14 via $($script:PackageManager)..."
-    if (-not (Invoke-PackageInstall -WingetId 'Python.Python.3.14' -ChocoId 'python' -ChocoExtraArgs @('--version=3.14.0'))) {
+    if (-not (Invoke-PackageInstall -WingetId 'Python.Python.3.14' -ChocoId 'python3')) {
         Fail "Install of Python failed via $($script:PackageManager) (exit code $LASTEXITCODE)"
         Set-Result -Tool 'python' -Status 'Failed' -Notes "$($script:PackageManager) exit $LASTEXITCODE"
         return
