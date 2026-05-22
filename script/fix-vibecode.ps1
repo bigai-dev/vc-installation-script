@@ -745,24 +745,28 @@ foreach ($r in $script:results.Values) {
 Write-Host ""
 Say "=================================================================" Cyan
 if ($DiagnoseOnly) {
-    Say "  Diagnose mode finished. Re-run WITHOUT -DiagnoseOnly to apply fixes." Yellow
+    Say "  Diagnose-only finished. Re-run WITHOUT -DiagnoseOnly to apply fixes." Yellow
 } elseif ($allGood) {
-    Say "  Done. Close this window, open a fresh PowerShell, then test:" Green
-    Say "      python --version" White
-    Say "      node --version" White
-    Say "      npm --version" White
-    if (-not $SkipClaudeCode) { Say "      claude --version" White }
+    Say "  All tools are working in THIS PowerShell window." Green
+    Write-Host ""
+    Say "  Next steps - sign in to each CLI (run these in this same window):" White
+    Say "      gh auth login" White
+    Say "      supabase login" White
+    Say "      vercel login" White
+    Write-Host ""
+    Say "  (Each will open a browser. Follow the prompts.)" Gray
 } else {
-    Say "  Almost done. Now CLOSE this window and open a fresh PowerShell." Yellow
-    Say "  PATH changes don't apply to terminals that were already open." Yellow
-    Say "  In the new window, test:" Gray
-    Say "      python --version" White
-    Say "      node --version" White
-    if (-not $SkipClaudeCode) { Say "      claude --version" White }
-    Say "" Gray
-    Say "  If it still fails, re-run this script with -DiagnoseOnly to see why." Gray
+    Say "  Some tools failed. See the table above." Yellow
+    Say "  Try closing this window and opening a fresh PowerShell as Administrator," Yellow
+    Say "  then re-run this script. If the same tools fail again, share the log:" Yellow
+    if ($script:LogPath) { Say "      $($script:LogPath)" White }
+    Write-Host ""
+    Say "  Next steps once all tools are working - sign in to each CLI:" Gray
+    Say "      gh auth login" Gray
+    Say "      supabase login" Gray
+    Say "      vercel login" Gray
 }
-Say "  PATH backups saved in: $backupDir" Gray
+Say "  PATH backups: $backupDir" Gray
 Say "=================================================================" Cyan
 Write-Host ""
 
