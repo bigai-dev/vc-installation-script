@@ -55,6 +55,26 @@ if (-not $DiagnoseOnly) {
     }
 }
 
+# ---------- Results tracking (final report renders from here) ----------
+$script:results = [ordered]@{}
+
+function Set-Result {
+    param(
+        [Parameter(Mandatory)][string]$Tool,
+        [Parameter(Mandatory)][ValidateSet('Installed','AlreadyInstalled','PathFixed','Failed','Skipped')][string]$Status,
+        [string]$Version,
+        [string]$Path,
+        [string]$Notes
+    )
+    $script:results[$Tool] = [PSCustomObject]@{
+        Tool    = $Tool
+        Status  = $Status
+        Version = $Version
+        Path    = $Path
+        Notes   = $Notes
+    }
+}
+
 # ---------- Output helpers ----------
 function Say($msg, $color = "White") { Write-Host $msg -ForegroundColor $color }
 function Step($msg)  { Write-Host ""; Write-Host "==> $msg" -ForegroundColor Cyan }
