@@ -195,56 +195,93 @@ if ($totalLen -gt 1024) {
 Step "Checking Python"
 Refresh-Path
 
-$pythonExe = $null
-$pyCmd = Get-Command python -ErrorAction SilentlyContinue
-if ($pyCmd -and $pyCmd.Source -notmatch "WindowsApps\\python\.exe$") {
-    # Beware of the Microsoft Store stub at WindowsApps\python.exe — it launches the store
-    $pythonExe = $pyCmd.Source
-    OK "python found: $pythonExe"
-} else {
-    if ($pyCmd) {
-        Warn "Only the Microsoft Store stub is on PATH (not a real Python). Searching for the real one..."
-    } else {
-        Warn "python not on PATH. Searching for the install..."
-    }
+function Install-Python {
+    $pythonExe = $null
 
-    # Common Python install locations (handbook uses standalone installer to LocalAppData by default)
+    # 1. Enumerate ALL python.exe under common install roots (don't trust Get-Command order)
     $pyCandidates = @()
     $pyCandidates += Get-ChildItem -Path "$env:LOCALAPPDATA\Programs\Python" -Filter "python.exe" -Recurse -ErrorAction SilentlyContinue
     $pyCandidates += Get-ChildItem -Path "$env:ProgramFiles\Python*" -Filter "python.exe" -ErrorAction SilentlyContinue
     $pyCandidates += Get-ChildItem -Path "${env:ProgramFiles(x86)}\Python*" -Filter "python.exe" -ErrorAction SilentlyContinue
+    $pyCandidates = $pyCandidates | Where-Object { $_.FullName -notmatch '\\WindowsApps\\' }
 
-    # Prefer the highest version found
-    $pyCandidates = $pyCandidates | Where-Object { $_.FullName -notmatch "WindowsApps" } | Sort-Object FullName -Descending
+    # 2. Pick the highest-version install
+    $best = $null
+    foreach ($c in $pyCandidates) {
+        try {
+            $v = (& $c.FullName --version 2>&1) -replace '^Python\s+',''
+            if ($v -match '^\d+\.\d+') {
+                if (-not $best -or [version]$best.Version -lt [version]$v) {
+                    $best = [PSCustomObject]@{ Path = $c.FullName; Version = $v }
+                }
+            }
+        } catch { }
+    }
 
-    if ($pyCandidates.Count -gt 0) {
-        $pythonExe = $pyCandidates[0].FullName
+    if ($best -and ([version]$best.Version -ge [version]"3.14")) {
+        $pythonExe = $best.Path
+        OK "Python $($best.Version) found: $pythonExe"
+
         $pyDir = Split-Path $pythonExe -Parent
         $scriptsDir = Join-Path $pyDir "Scripts"
+        $userEntries = Get-UserPath
+        if ($userEntries -notcontains $pyDir) {
+            # Prepend so this Python wins lookup order
+            if (-not $DiagnoseOnly) {
+                $filtered = $userEntries | Where-Object { $_ -ne $pyDir }
+                Set-UserPath (@($pyDir, $scriptsDir) + $filtered)
+                $env:Path = "$pyDir;$scriptsDir;$env:Path"
+                OK "Prepended to User PATH: $pyDir"
+                Set-Result -Tool 'python' -Status 'PathFixed' -Version $best.Version -Path $pythonExe
+            } else {
+                Warn "WOULD prepend Python to PATH (diagnose only)"
+                Set-Result -Tool 'python' -Status 'Skipped' -Version $best.Version -Path $pythonExe -Notes "PATH fix pending"
+            }
+        } else {
+            Set-Result -Tool 'python' -Status 'AlreadyInstalled' -Version $best.Version -Path $pythonExe
+        }
+        return
+    }
 
-        OK "Found Python at: $pythonExe"
-        Info "(The handbook's 'Add python.exe to PATH' checkbox was probably missed)"
-
-        # Add both python folder and Scripts folder (for pip-installed tools)
-        Add-UserPathEntry $pyDir | Out-Null
-        if (Test-Path $scriptsDir) { Add-UserPathEntry $scriptsDir | Out-Null }
+    if ($best) {
+        Warn "Found Python $($best.Version), but workshop requires 3.14+. Will install 3.14 alongside."
     } else {
-        Fail "No Python install found anywhere."
-        Info "Re-run the handbook's Python steps, and THIS TIME tick"
-        Info "'Add python.exe to PATH' on the first installer screen."
+        Warn "No Python install found."
+    }
+
+    if ($DiagnoseOnly) {
+        Set-Result -Tool 'python' -Status 'Skipped' -Notes "Would install Python 3.14 via winget"
+        return
+    }
+
+    Info "Installing Python 3.14 via winget..."
+    & winget install -e --id Python.Python.3.14 --silent --accept-package-agreements --accept-source-agreements | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+        Fail "winget install of Python failed (exit code $LASTEXITCODE)"
+        Set-Result -Tool 'python' -Status 'Failed' -Notes "winget exit $LASTEXITCODE"
+        return
+    }
+    Refresh-Path
+
+    # Re-find after install
+    $newPath = Get-ChildItem -Path "$env:LOCALAPPDATA\Programs\Python\Python314" -Filter "python.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($newPath) {
+        $pyDir = Split-Path $newPath.FullName -Parent
+        $scriptsDir = Join-Path $pyDir "Scripts"
+        $userEntries = Get-UserPath
+        $filtered = $userEntries | Where-Object { $_ -ne $pyDir -and $_ -ne $scriptsDir }
+        Set-UserPath (@($pyDir, $scriptsDir) + $filtered)
+        $env:Path = "$pyDir;$scriptsDir;$env:Path"
+        $v = (& $newPath.FullName --version 2>&1) -replace '^Python\s+',''
+        OK "Python $v installed and on PATH: $($newPath.FullName)"
+        Set-Result -Tool 'python' -Status 'Installed' -Version $v -Path $newPath.FullName
+    } else {
+        Fail "Python install reported success but python.exe not found in expected location"
+        Set-Result -Tool 'python' -Status 'Failed' -Notes "Post-install search failed"
     }
 }
 
-# Verify python works now
-if ($pythonExe) {
-    Refresh-Path
-    try {
-        $v = & $pythonExe --version 2>&1
-        OK "Python version: $v"
-    } catch {
-        Fail "Could not run python: $_"
-    }
-}
+Install-Python
 
 # ---------- Find and fix Node.js ----------
 Step "Checking Node.js"
