@@ -128,18 +128,78 @@ function Refresh-Path {
     )
 }
 
+# ---------- Bootstrap winget if missing ----------
+function Install-Winget {
+    Info "Attempting to install winget automatically (App Installer + dependencies)..."
+
+    $tempDir = Join-Path $env:TEMP "winget-bootstrap"
+    New-Item -ItemType Directory -Force -Path $tempDir | Out-Null
+
+    # Detect architecture (most workshop machines are x64; arm64 is rare but supported)
+    $arch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'x64' }
+
+    # Order matters: VCLibs -> UI.Xaml -> winget itself.
+    $deps = @(
+        @{
+            Name = 'Microsoft.VCLibs'
+            Url  = "https://aka.ms/Microsoft.VCLibs.$arch.14.00.Desktop.appx"
+            File = 'vclibs.appx'
+        },
+        @{
+            Name = 'Microsoft.UI.Xaml 2.8'
+            # Pinned to 2.8.6 because current winget releases (1.7+) require UI.Xaml 2.8.
+            # If a future winget bumps the requirement, update this URL.
+            Url  = "https://github.com/microsoft/microsoft-ui-xaml/releases/download/v2.8.6/Microsoft.UI.Xaml.2.8.$arch.appx"
+            File = 'uixaml.appx'
+        },
+        @{
+            Name = 'winget (Microsoft.DesktopAppInstaller)'
+            Url  = 'https://aka.ms/getwinget'
+            File = 'winget.msixbundle'
+        }
+    )
+
+    foreach ($dep in $deps) {
+        $dest = Join-Path $tempDir $dep.File
+        try {
+            Info "  Downloading $($dep.Name)..."
+            Invoke-WebRequest -Uri $dep.Url -OutFile $dest -UseBasicParsing -ErrorAction Stop
+            Info "  Installing $($dep.Name)..."
+            Add-AppxPackage -Path $dest -ErrorAction Stop
+            OK "  $($dep.Name) installed"
+        } catch {
+            Warn "  Failed to install $($dep.Name): $($_.Exception.Message)"
+        }
+    }
+
+    Refresh-Path
+    return [bool](Get-Command winget -ErrorAction SilentlyContinue)
+}
+
 # ---------- Preflight: check winget is available ----------
 Step "Checking winget availability"
 $wingetCmd = Get-Command winget -ErrorAction SilentlyContinue
 if (-not $wingetCmd) {
-    Fail "winget is not installed."
-    Info "Install 'App Installer' from the Microsoft Store, then re-run this script:"
-    Info "  https://apps.microsoft.com/detail/9NBLGGH4NNS1"
-    Info ""
-    Info "After install, close PowerShell, open a fresh window, and run this script again."
-    if ($script:LogPath) { try { Stop-Transcript | Out-Null } catch { } }
-    exit 2
-} else {
+    Warn "winget is not installed."
+    if ($DiagnoseOnly) {
+        Fail "Cannot bootstrap winget in diagnose-only mode. Re-run without -DiagnoseOnly."
+        if ($script:LogPath) { try { Stop-Transcript | Out-Null } catch { } }
+        exit 2
+    }
+    if (Install-Winget) {
+        $wingetCmd = Get-Command winget -ErrorAction SilentlyContinue
+        OK "winget bootstrap succeeded"
+    } else {
+        Fail "Could not bootstrap winget automatically."
+        Info "Install 'App Installer' manually from the Microsoft Store:"
+        Info "  https://apps.microsoft.com/detail/9NBLGGH4NNS1"
+        Info "Then re-run this script."
+        if ($script:LogPath) { try { Stop-Transcript | Out-Null } catch { } }
+        exit 2
+    }
+}
+
+if ($wingetCmd) {
     try {
         $wv = (& winget --version) 2>&1
         OK "winget $wv"
