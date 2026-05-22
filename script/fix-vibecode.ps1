@@ -287,13 +287,38 @@ Install-Python
 Step "Checking Node.js"
 Refresh-Path
 
-$nodeExe = $null
-$nodeCmd = Get-Command node -ErrorAction SilentlyContinue
-if ($nodeCmd) {
-    $nodeExe = $nodeCmd.Source
-    OK "node found: $nodeExe"
-} else {
-    Warn "node not on PATH. Searching..."
+function Install-Node {
+    $nodeCmd = Get-Command node -ErrorAction SilentlyContinue
+    if ($nodeCmd) {
+        $nv = (& node --version 2>&1).Trim()
+        $npmv = (& npm --version 2>&1).Trim()
+        OK "node $nv,  npm $npmv  ($($nodeCmd.Source))"
+
+        $major = [int]($nv -replace '^v(\d+)\..*','$1')
+        if ($major -lt 18) {
+            Warn "Node $nv is below v18. Upgrading via winget..."
+            if (-not $DiagnoseOnly) {
+                & winget install -e --id OpenJS.NodeJS.LTS --silent --accept-package-agreements --accept-source-agreements | Out-Host
+                Refresh-Path
+                $nv2 = (& node --version 2>&1).Trim()
+                OK "node upgraded: $nv2"
+                Set-Result -Tool 'node' -Status 'Installed' -Version $nv2 -Path (Get-Command node).Source
+            } else {
+                Set-Result -Tool 'node' -Status 'Skipped' -Version $nv -Path $nodeCmd.Source -Notes "Would upgrade to LTS"
+            }
+        } else {
+            Set-Result -Tool 'node' -Status 'AlreadyInstalled' -Version $nv -Path $nodeCmd.Source
+        }
+
+        # Always make sure npm-global folder is on PATH (it's where supabase/vercel land)
+        $npmGlobal = "$env:APPDATA\npm"
+        if (Test-Path $npmGlobal) {
+            Add-UserPathEntry $npmGlobal | Out-Null
+        }
+        return
+    }
+
+    Warn "node not on PATH. Searching for existing install..."
     $nodeCandidates = @(
         "$env:ProgramFiles\nodejs\node.exe",
         "${env:ProgramFiles(x86)}\nodejs\node.exe",
@@ -301,41 +326,45 @@ if ($nodeCmd) {
     )
     $found = $nodeCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
     if ($found) {
-        $nodeExe = $found
         $nodeDir = Split-Path $found -Parent
-        OK "Found Node at: $nodeExe"
-        Info "(The .msi added it to System PATH, but your shell hasn't seen the update)"
         Add-UserPathEntry $nodeDir | Out-Null
-    } else {
-        Fail "No Node.js install found."
-        Info "Re-run the handbook's Node.js steps (Windows Installer .msi)."
+        Refresh-Path
+        $nv = (& node --version 2>&1).Trim()
+        OK "Found existing Node $nv at: $found (PATH fixed)"
+        Set-Result -Tool 'node' -Status 'PathFixed' -Version $nv -Path $found
+        return
     }
-}
 
-# Verify node + npm
-if ($nodeExe) {
+    if ($DiagnoseOnly) {
+        Set-Result -Tool 'node' -Status 'Skipped' -Notes "Would install Node LTS via winget"
+        return
+    }
+
+    Info "Installing Node.js LTS via winget..."
+    & winget install -e --id OpenJS.NodeJS.LTS --silent --accept-package-agreements --accept-source-agreements | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+        Fail "winget install of Node failed (exit code $LASTEXITCODE)"
+        Set-Result -Tool 'node' -Status 'Failed' -Notes "winget exit $LASTEXITCODE"
+        return
+    }
     Refresh-Path
-    try {
-        $nv = & node --version 2>&1
-        $npmv = & npm --version 2>&1
-        OK "node $nv,  npm $npmv"
+    $nodeCmd = Get-Command node -ErrorAction SilentlyContinue
+    if ($nodeCmd) {
+        $nv = (& node --version 2>&1).Trim()
+        OK "Node $nv installed: $($nodeCmd.Source)"
+        Set-Result -Tool 'node' -Status 'Installed' -Version $nv -Path $nodeCmd.Source
 
-        # Check Node version meets Claude Code's minimum (18+)
-        $major = [int]($nv -replace '^v(\d+)\..*','$1')
-        if ($major -lt 18) {
-            Warn "Node $nv is below v18, which Claude Code requires."
-            Info "Re-download the LTS .msi from nodejs.org (currently v20 or v22)."
-        }
-    } catch {
-        Fail "Could not run node/npm: $_"
-    }
-
-    # Make sure the npm global folder is on PATH (this is where 'claude' lives if installed via npm)
-    $npmGlobal = "$env:APPDATA\npm"
-    if (Test-Path $npmGlobal) {
+        # Add npm-global folder
+        $npmGlobal = "$env:APPDATA\npm"
+        if (-not (Test-Path $npmGlobal)) { New-Item -ItemType Directory -Path $npmGlobal -Force | Out-Null }
         Add-UserPathEntry $npmGlobal | Out-Null
+    } else {
+        Fail "Node install reported success but node.exe not found"
+        Set-Result -Tool 'node' -Status 'Failed' -Notes "Post-install search failed"
     }
 }
+
+Install-Node
 
 # ---------- Install Claude Code ----------
 if (-not $SkipClaudeCode -and -not $DiagnoseOnly) {
