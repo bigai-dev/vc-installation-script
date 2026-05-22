@@ -9,7 +9,7 @@
 
     For each tool the script:
       - Looks for an existing install (filters out the Microsoft Store stub)
-      - Installs via winget (or npm, for supabase/vercel) if missing
+      - Installs via winget (or Chocolatey if winget is unavailable; npm for supabase/vercel) if missing
       - Adds the right folder to User PATH if needed (no setx — uses .NET API)
       - Verifies the tool runs in the same PowerShell window
 
@@ -128,83 +128,81 @@ function Refresh-Path {
     )
 }
 
-# ---------- Bootstrap winget if missing ----------
-function Install-Winget {
-    Info "Attempting to install winget automatically (App Installer + dependencies)..."
-
-    $tempDir = Join-Path $env:TEMP "winget-bootstrap"
-    New-Item -ItemType Directory -Force -Path $tempDir | Out-Null
-
-    # Detect architecture (most workshop machines are x64; arm64 is rare but supported)
-    $arch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'x64' }
-
-    # Order matters: VCLibs -> UI.Xaml -> winget itself.
-    $deps = @(
-        @{
-            Name = 'Microsoft.VCLibs'
-            Url  = "https://aka.ms/Microsoft.VCLibs.$arch.14.00.Desktop.appx"
-            File = 'vclibs.appx'
-        },
-        @{
-            Name = 'Microsoft.UI.Xaml 2.8'
-            # Pinned to 2.8.6 because current winget releases (1.7+) require UI.Xaml 2.8.
-            # If a future winget bumps the requirement, update this URL.
-            Url  = "https://github.com/microsoft/microsoft-ui-xaml/releases/download/v2.8.6/Microsoft.UI.Xaml.2.8.$arch.appx"
-            File = 'uixaml.appx'
-        },
-        @{
-            Name = 'winget (Microsoft.DesktopAppInstaller)'
-            Url  = 'https://aka.ms/getwinget'
-            File = 'winget.msixbundle'
+# ---------- Bootstrap Chocolatey (fallback when winget is missing) ----------
+function Install-Chocolatey {
+    if (Get-Command choco -ErrorAction SilentlyContinue) {
+        OK "Chocolatey already installed"
+        return $true
+    }
+    Info "Installing Chocolatey package manager (~5 MB, much faster than bootstrapping winget)..."
+    try {
+        Set-ExecutionPolicy Bypass -Scope Process -Force
+        [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
+        Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+        Refresh-Path
+        if (Get-Command choco -ErrorAction SilentlyContinue) {
+            OK "Chocolatey bootstrap succeeded"
+            return $true
         }
+        Fail "Chocolatey install completed but 'choco' not on PATH"
+        return $false
+    } catch {
+        Fail "Could not bootstrap Chocolatey: $($_.Exception.Message)"
+        return $false
+    }
+}
+
+# Wraps a package install across winget and choco so the per-tool functions
+# don't need to branch. Sets $LASTEXITCODE; returns $true on success.
+function Invoke-PackageInstall {
+    param(
+        [Parameter(Mandatory)][string]$WingetId,
+        [Parameter(Mandatory)][string]$ChocoId,
+        [string[]]$ChocoExtraArgs = @()
     )
-
-    foreach ($dep in $deps) {
-        $dest = Join-Path $tempDir $dep.File
-        try {
-            Info "  Downloading $($dep.Name)..."
-            Invoke-WebRequest -Uri $dep.Url -OutFile $dest -UseBasicParsing -ErrorAction Stop
-            Info "  Installing $($dep.Name)..."
-            Add-AppxPackage -Path $dest -ErrorAction Stop
-            OK "  $($dep.Name) installed"
-        } catch {
-            Warn "  Failed to install $($dep.Name): $($_.Exception.Message)"
-        }
-    }
-
-    Refresh-Path
-    return [bool](Get-Command winget -ErrorAction SilentlyContinue)
-}
-
-# ---------- Preflight: check winget is available ----------
-Step "Checking winget availability"
-$wingetCmd = Get-Command winget -ErrorAction SilentlyContinue
-if (-not $wingetCmd) {
-    Warn "winget is not installed."
-    if ($DiagnoseOnly) {
-        Fail "Cannot bootstrap winget in diagnose-only mode. Re-run without -DiagnoseOnly."
-        if ($script:LogPath) { try { Stop-Transcript | Out-Null } catch { } }
-        exit 2
-    }
-    if (Install-Winget) {
-        $wingetCmd = Get-Command winget -ErrorAction SilentlyContinue
-        OK "winget bootstrap succeeded"
+    if ($script:PackageManager -eq 'winget') {
+        & winget install -e --id $WingetId --silent --accept-package-agreements --accept-source-agreements | Out-Host
+    } elseif ($script:PackageManager -eq 'choco') {
+        $chocoArgs = @('install', $ChocoId, '-y', '--no-progress') + $ChocoExtraArgs
+        & choco @chocoArgs | Out-Host
     } else {
-        Fail "Could not bootstrap winget automatically."
-        Info "Install 'App Installer' manually from the Microsoft Store:"
-        Info "  https://apps.microsoft.com/detail/9NBLGGH4NNS1"
-        Info "Then re-run this script."
-        if ($script:LogPath) { try { Stop-Transcript | Out-Null } catch { } }
-        exit 2
+        return $false
     }
+    return ($LASTEXITCODE -eq 0)
 }
 
+# ---------- Preflight: pick a package manager ----------
+Step "Choosing a package manager (winget preferred, Chocolatey fallback)"
+$script:PackageManager = $null
+
+$wingetCmd = Get-Command winget -ErrorAction SilentlyContinue
 if ($wingetCmd) {
     try {
         $wv = (& winget --version) 2>&1
-        OK "winget $wv"
+        OK "winget $wv (using winget)"
+        $script:PackageManager = 'winget'
     } catch {
         Warn "winget found but did not respond to --version: $_"
+    }
+}
+
+if (-not $script:PackageManager) {
+    if ($DiagnoseOnly) {
+        Fail "winget not available, and Chocolatey bootstrap is skipped in -DiagnoseOnly mode."
+        Info "Re-run without -DiagnoseOnly to install Chocolatey + the workshop tools."
+        if ($script:LogPath) { try { Stop-Transcript | Out-Null } catch { } }
+        exit 2
+    }
+    Warn "winget is not available - falling back to Chocolatey."
+    if (Install-Chocolatey) {
+        $script:PackageManager = 'choco'
+        OK "Using Chocolatey"
+    } else {
+        Fail "No package manager available (winget missing, Chocolatey bootstrap failed)."
+        Info "Install winget (App Installer from Microsoft Store) or run Chocolatey's installer manually:"
+        Info "  https://chocolatey.org/install"
+        if ($script:LogPath) { try { Stop-Transcript | Out-Null } catch { } }
+        exit 2
     }
 }
 
@@ -311,15 +309,14 @@ function Install-Python {
     }
 
     if ($DiagnoseOnly) {
-        Set-Result -Tool 'python' -Status 'Skipped' -Notes "Would install Python 3.14 via winget"
+        Set-Result -Tool 'python' -Status 'Skipped' -Notes "Would install Python 3.14 via $($script:PackageManager)"
         return
     }
 
-    Info "Installing Python 3.14 via winget..."
-    & winget install -e --id Python.Python.3.14 --silent --accept-package-agreements --accept-source-agreements | Out-Host
-    if ($LASTEXITCODE -ne 0) {
-        Fail "winget install of Python failed (exit code $LASTEXITCODE)"
-        Set-Result -Tool 'python' -Status 'Failed' -Notes "winget exit $LASTEXITCODE"
+    Info "Installing Python 3.14 via $($script:PackageManager)..."
+    if (-not (Invoke-PackageInstall -WingetId 'Python.Python.3.14' -ChocoId 'python' -ChocoExtraArgs @('--version=3.14.0'))) {
+        Fail "Install of Python failed via $($script:PackageManager) (exit code $LASTEXITCODE)"
+        Set-Result -Tool 'python' -Status 'Failed' -Notes "$($script:PackageManager) exit $LASTEXITCODE"
         return
     }
     Refresh-Path
@@ -357,9 +354,9 @@ function Install-Node {
 
         $major = [int]($nv -replace '^v(\d+)\..*','$1')
         if ($major -lt 18) {
-            Warn "Node $nv is below v18. Upgrading via winget..."
+            Warn "Node $nv is below v18. Upgrading via $($script:PackageManager)..."
             if (-not $DiagnoseOnly) {
-                & winget install -e --id OpenJS.NodeJS.LTS --silent --accept-package-agreements --accept-source-agreements | Out-Host
+                Invoke-PackageInstall -WingetId 'OpenJS.NodeJS.LTS' -ChocoId 'nodejs-lts' | Out-Null
                 Refresh-Path
                 $nv2 = (& node --version 2>&1).Trim()
                 OK "node upgraded: $nv2"
@@ -397,15 +394,14 @@ function Install-Node {
     }
 
     if ($DiagnoseOnly) {
-        Set-Result -Tool 'node' -Status 'Skipped' -Notes "Would install Node LTS via winget"
+        Set-Result -Tool 'node' -Status 'Skipped' -Notes "Would install Node LTS via $($script:PackageManager)"
         return
     }
 
-    Info "Installing Node.js LTS via winget..."
-    & winget install -e --id OpenJS.NodeJS.LTS --silent --accept-package-agreements --accept-source-agreements | Out-Host
-    if ($LASTEXITCODE -ne 0) {
-        Fail "winget install of Node failed (exit code $LASTEXITCODE)"
-        Set-Result -Tool 'node' -Status 'Failed' -Notes "winget exit $LASTEXITCODE"
+    Info "Installing Node.js LTS via $($script:PackageManager)..."
+    if (-not (Invoke-PackageInstall -WingetId 'OpenJS.NodeJS.LTS' -ChocoId 'nodejs-lts')) {
+        Fail "Install of Node failed via $($script:PackageManager) (exit code $LASTEXITCODE)"
+        Set-Result -Tool 'node' -Status 'Failed' -Notes "$($script:PackageManager) exit $LASTEXITCODE"
         return
     }
     Refresh-Path
@@ -439,15 +435,14 @@ function Install-Git {
         Set-Result -Tool 'git' -Status 'AlreadyInstalled' -Version ($gv -replace '^git version\s+','') -Path $gitCmd.Source
     } else {
         if ($DiagnoseOnly) {
-            Warn "git not found. Would install via winget."
-            Set-Result -Tool 'git' -Status 'Skipped' -Notes "Would install Git via winget"
+            Warn "git not found. Would install via $($script:PackageManager)."
+            Set-Result -Tool 'git' -Status 'Skipped' -Notes "Would install Git via $($script:PackageManager)"
             return
         }
-        Info "Installing Git via winget..."
-        & winget install -e --id Git.Git --silent --accept-package-agreements --accept-source-agreements | Out-Host
-        if ($LASTEXITCODE -ne 0) {
-            Fail "winget install of Git failed (exit code $LASTEXITCODE)"
-            Set-Result -Tool 'git' -Status 'Failed' -Notes "winget exit $LASTEXITCODE"
+        Info "Installing Git via $($script:PackageManager)..."
+        if (-not (Invoke-PackageInstall -WingetId 'Git.Git' -ChocoId 'git')) {
+            Fail "Install of Git failed via $($script:PackageManager) (exit code $LASTEXITCODE)"
+            Set-Result -Tool 'git' -Status 'Failed' -Notes "$($script:PackageManager) exit $LASTEXITCODE"
             return
         }
         Refresh-Path
@@ -523,16 +518,15 @@ function Install-GitHubCLI {
     }
 
     if ($DiagnoseOnly) {
-        Warn "gh not found. Would install via winget."
-        Set-Result -Tool 'gh' -Status 'Skipped' -Notes "Would install GitHub CLI via winget"
+        Warn "gh not found. Would install via $($script:PackageManager)."
+        Set-Result -Tool 'gh' -Status 'Skipped' -Notes "Would install GitHub CLI via $($script:PackageManager)"
         return
     }
 
-    Info "Installing GitHub CLI via winget..."
-    & winget install -e --id GitHub.cli --silent --accept-package-agreements --accept-source-agreements | Out-Host
-    if ($LASTEXITCODE -ne 0) {
-        Fail "winget install of gh failed (exit code $LASTEXITCODE)"
-        Set-Result -Tool 'gh' -Status 'Failed' -Notes "winget exit $LASTEXITCODE"
+    Info "Installing GitHub CLI via $($script:PackageManager)..."
+    if (-not (Invoke-PackageInstall -WingetId 'GitHub.cli' -ChocoId 'gh')) {
+        Fail "Install of gh failed via $($script:PackageManager) (exit code $LASTEXITCODE)"
+        Set-Result -Tool 'gh' -Status 'Failed' -Notes "$($script:PackageManager) exit $LASTEXITCODE"
         return
     }
     Refresh-Path
