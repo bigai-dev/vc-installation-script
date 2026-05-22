@@ -1,36 +1,37 @@
 <#
 .SYNOPSIS
-    Vibe Code Workshop — fix "xxx is not recognized" errors after following the handbook.
+    Vibe Code Workshop — install and verify every tool the workshop needs.
 
 .DESCRIPTION
-    The handbook tells you to install Python and Node.js via .exe/.msi installers.
-    This is fine, but it produces the "not recognized" error in several common ways:
+    Diagnoses, installs, and repairs every CLI the workshop uses on Windows:
+    Python 3.14, Node.js LTS, Git, GitHub CLI (gh), Supabase CLI, Vercel CLI,
+    and Claude Code.
 
-      1. Python: missing the "Add python.exe to PATH" checkbox during install.
-      2. Node:   PATH update didn't reach your already-open PowerShell window.
-      3. Either: corrupted PATH (>1024 chars, broken entries, duplicates).
-      4. Either: install succeeded but in a folder that never got added to PATH.
+    For each tool the script:
+      - Looks for an existing install (filters out the Microsoft Store stub)
+      - Installs via winget (or npm, for supabase/vercel) if missing
+      - Adds the right folder to User PATH if needed (no setx — uses .NET API)
+      - Verifies the tool runs in the same PowerShell window
 
-    This script:
-      - Finds python.exe and node.exe even if they're not on PATH
-      - Adds the correct folders to your User PATH (no admin needed, no setx)
-      - Backs up your PATH before changing anything
-      - Cleans broken entries and duplicates
-      - Installs Claude Code via the official native installer
-      - Tells you EXACTLY which command is broken and why
+    It also:
+      - Backs up User and Machine PATH before changes (rollback safety)
+      - Cleans broken/duplicate User PATH entries
+      - Prompts for git user.name / user.email if unset
+      - Writes a full session log to %TEMP%
+      - Prints a final ✅/❌ table per tool, plus the 3 login commands to run next
 
 .USAGE
-    1. Right-click PowerShell -> Run as Administrator (or regular user works too)
-    2. Run:  Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-    3. Run:  .\fix-vibecode.ps1
-    4. CLOSE this PowerShell window and open a fresh one
-    5. Type:  python --version    node --version    claude --version
+    Easiest: double-click run-fixer.bat (handles UAC and execution policy).
+
+    From an Administrator PowerShell:
+      .\fix-vibecode.ps1            # full install + repair
+      .\fix-vibecode.ps1 -DiagnoseOnly   # read-only — show what would change
 
 .PARAMETER DiagnoseOnly
     Don't change anything, just show what's wrong.
 
 .PARAMETER SkipClaudeCode
-    Don't install Claude Code (only fix Python/Node PATH).
+    Don't install Claude Code (only fix the rest).
 #>
 
 [CmdletBinding()]
