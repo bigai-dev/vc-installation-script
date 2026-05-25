@@ -258,12 +258,15 @@ Refresh-Path
 
 # Enumerate every python.exe under the install roots winget AND choco use.
 # Choco installs to C:\Python314\, winget to %LOCALAPPDATA%\Programs\Python\Python314\.
+# Use a literal "...\python.exe" in the path (with a wildcard segment in between)
+# rather than -Filter: with a wildcard *directory* path, -Filter checks the matched
+# directory's NAME, not its contents, so it always returns nothing.
 function Find-PythonInstalls {
     $found = @()
-    $found += Get-ChildItem -Path "$env:LOCALAPPDATA\Programs\Python" -Filter "python.exe" -Recurse -ErrorAction SilentlyContinue
-    $found += Get-ChildItem -Path "$env:ProgramFiles\Python*" -Filter "python.exe" -ErrorAction SilentlyContinue
-    $found += Get-ChildItem -Path "${env:ProgramFiles(x86)}\Python*" -Filter "python.exe" -ErrorAction SilentlyContinue
-    $found += Get-ChildItem -Path "C:\Python*" -Filter "python.exe" -ErrorAction SilentlyContinue
+    $found += Get-ChildItem -Path "$env:LOCALAPPDATA\Programs\Python\*\python.exe" -ErrorAction SilentlyContinue
+    $found += Get-ChildItem -Path "$env:ProgramFiles\Python*\python.exe" -ErrorAction SilentlyContinue
+    $found += Get-ChildItem -Path "${env:ProgramFiles(x86)}\Python*\python.exe" -ErrorAction SilentlyContinue
+    $found += Get-ChildItem -Path "C:\Python*\python.exe" -ErrorAction SilentlyContinue
     return @($found | Where-Object { $_.FullName -notmatch '\\WindowsApps\\' })
 }
 
