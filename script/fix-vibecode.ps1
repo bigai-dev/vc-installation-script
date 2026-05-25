@@ -471,37 +471,15 @@ function Install-Git {
         }
     }
 
-    # Configure user.name / user.email if missing
+    # Check git user.name / user.email but don't prompt: students at install time
+    # often don't have a GitHub account yet and shouldn't be forced to invent values
+    # they'll later want to change. Surfaced as a "do this later" reminder instead.
     if (-not $DiagnoseOnly) {
         $existingName  = (& git config --global user.name 2>$null)
         $existingEmail = (& git config --global user.email 2>$null)
         if ([string]::IsNullOrWhiteSpace($existingName) -or [string]::IsNullOrWhiteSpace($existingEmail)) {
-            Info "Git needs your name and email for commits (one-time setup)."
-            try {
-                if ([string]::IsNullOrWhiteSpace($existingName)) {
-                    $name = Read-Host "  Your full name (e.g. Jay Tan)"
-                    if (-not [string]::IsNullOrWhiteSpace($name)) {
-                        & git config --global user.name $name.Trim()
-                        OK "git user.name set"
-                    } else {
-                        Warn "Skipped: no name entered. Run 'git config --global user.name `"Your Name`"' later."
-                    }
-                }
-                if ([string]::IsNullOrWhiteSpace($existingEmail)) {
-                    $email = Read-Host "  Your email (your gmail address)"
-                    if (-not [string]::IsNullOrWhiteSpace($email)) {
-                        & git config --global user.email $email.Trim()
-                        OK "git user.email set"
-                    } else {
-                        Warn "Skipped: no email entered. Run 'git config --global user.email `"you@gmail.com`"' later."
-                    }
-                }
-            } catch {
-                Warn "Git config prompt was cancelled or failed: $($_.Exception.Message)"
-                Info "You can set these later:"
-                Info "  git config --global user.name `"Your Name`""
-                Info "  git config --global user.email `"you@gmail.com`""
-            }
+            $script:GitIdentityMissing = $true
+            Warn "git user.name / user.email not set - configure before your first commit (see end of run)."
         } else {
             OK "git user.name = $existingName"
             OK "git user.email = $existingEmail"
@@ -811,6 +789,12 @@ if ($DiagnoseOnly) {
     Say "      vercel login" White
     Write-Host ""
     Say "  (Each will open a browser. Follow the prompts.)" Gray
+    if ($script:GitIdentityMissing) {
+        Write-Host ""
+        Say "  Before your first git commit, set your identity:" Yellow
+        Say "      git config --global user.name `"Your Name`"" White
+        Say "      git config --global user.email `"you@example.com`"" White
+    }
 } else {
     Say "  Some tools failed. See the table above." Yellow
     Say "  Try closing this window and opening a fresh PowerShell as Administrator," Yellow
@@ -821,6 +805,11 @@ if ($DiagnoseOnly) {
     Say "      gh auth login" Gray
     Say "      supabase login" Gray
     Say "      vercel login" Gray
+    if ($script:GitIdentityMissing) {
+        Say "  Before your first git commit:" Gray
+        Say "      git config --global user.name `"Your Name`"" Gray
+        Say "      git config --global user.email `"you@example.com`"" Gray
+    }
 }
 $elapsed = (Get-Date) - $script:StartTime
 Say ("  Total time: {0} min {1:D2} sec" -f [int]$elapsed.TotalMinutes, $elapsed.Seconds) Gray
