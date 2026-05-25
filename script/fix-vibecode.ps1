@@ -261,18 +261,30 @@ if ($totalLen -gt 1024) {
 # downloaded ones still need a signature.
 Step "Setting PowerShell execution policy for CurrentUser"
 if (-not $DiagnoseOnly) {
+    $okPolicies = @('RemoteSigned', 'Unrestricted', 'Bypass')
+    $setErr = $null
     try {
         Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned -Force -ErrorAction Stop
-        $effective = Get-ExecutionPolicy -Scope CurrentUser
-        OK "CurrentUser execution policy = $effective"
-        # If group policy or machine scope overrides this, warn the student.
-        $resolved = Get-ExecutionPolicy
-        if ($resolved -eq 'Restricted' -or $resolved -eq 'AllSigned') {
-            Warn "Effective policy is still '$resolved' (likely set by Group Policy at machine scope)."
-            Warn "npm/supabase/vercel may still fail in fresh shells. Contact your IT admin."
-        }
     } catch {
-        Fail "Could not set execution policy: $($_.Exception.Message)"
+        # Set-ExecutionPolicy can throw "Security error" even when the registry
+        # write succeeds (e.g. in Windows Sandbox or under some lockdown configs).
+        # Don't fail outright - check the actual policy below and decide from there.
+        $setErr = $_.Exception.Message
+    }
+
+    $currentUserPolicy = Get-ExecutionPolicy -Scope CurrentUser
+    $resolved = Get-ExecutionPolicy
+    if ($currentUserPolicy -in $okPolicies -and $resolved -in $okPolicies) {
+        OK "CurrentUser execution policy = $currentUserPolicy (effective: $resolved)"
+    } elseif ($currentUserPolicy -in $okPolicies) {
+        Warn "CurrentUser is '$currentUserPolicy' but effective policy is '$resolved' (Group Policy override)."
+        Warn "npm/supabase/vercel may still fail in fresh shells. Contact your IT admin."
+    } else {
+        if ($setErr) {
+            Fail "Could not set execution policy: $setErr"
+        } else {
+            Fail "Execution policy is '$currentUserPolicy', expected one of: $($okPolicies -join ', ')"
+        }
         Warn "Students will hit 'running scripts is disabled' when using npm/supabase/vercel."
     }
 } else {
