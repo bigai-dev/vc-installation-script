@@ -252,6 +252,34 @@ if ($totalLen -gt 1024) {
     Warn "User PATH is $totalLen chars (>1024). NEVER use setx to edit PATH."
 }
 
+# ---------- PowerShell execution policy (CurrentUser scope) ----------
+# Without this, npm/supabase/vercel/etc. fail in every new PowerShell session
+# with "running scripts is disabled" because they're installed as .ps1 shims.
+# The .bat wrapper sets Bypass for THIS process only; we need a persistent
+# setting for the student's future PowerShell windows (e.g. Claude Desktop's
+# terminal). RemoteSigned is the standard dev setting - local scripts run,
+# downloaded ones still need a signature.
+Step "Setting PowerShell execution policy for CurrentUser"
+if (-not $DiagnoseOnly) {
+    try {
+        Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned -Force -ErrorAction Stop
+        $effective = Get-ExecutionPolicy -Scope CurrentUser
+        OK "CurrentUser execution policy = $effective"
+        # If group policy or machine scope overrides this, warn the student.
+        $resolved = Get-ExecutionPolicy
+        if ($resolved -eq 'Restricted' -or $resolved -eq 'AllSigned') {
+            Warn "Effective policy is still '$resolved' (likely set by Group Policy at machine scope)."
+            Warn "npm/supabase/vercel may still fail in fresh shells. Contact your IT admin."
+        }
+    } catch {
+        Fail "Could not set execution policy: $($_.Exception.Message)"
+        Warn "Students will hit 'running scripts is disabled' when using npm/supabase/vercel."
+    }
+} else {
+    $current = Get-ExecutionPolicy -Scope CurrentUser
+    Info "CurrentUser policy is currently '$current'. Would set to RemoteSigned."
+}
+
 # ---------- Find and fix Python ----------
 Step "Checking Python"
 Refresh-Path
