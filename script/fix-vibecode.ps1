@@ -348,8 +348,10 @@ Refresh-Path
 function Install-Node {
     $nodeCmd = Get-Command node -ErrorAction SilentlyContinue
     if ($nodeCmd) {
-        $nv = (& node --version 2>&1).Trim()
-        $npmv = (& npm --version 2>&1).Trim()
+        $nv = "$(& node --version 2>&1)".Trim()
+        # npm.cmd, not bare "npm": npm 11.x ships an npm.ps1 shim that mangles
+        # args when invoked as `& npm` from another .ps1 ("Unknown command: pm").
+        $npmv = "$(& npm.cmd --version 2>&1)".Trim()
         OK "node $nv,  npm $npmv  ($($nodeCmd.Source))"
 
         $major = [int]($nv -replace '^v(\d+)\..*','$1')
@@ -358,7 +360,7 @@ function Install-Node {
             if (-not $DiagnoseOnly) {
                 Invoke-PackageInstall -WingetId 'OpenJS.NodeJS.LTS' -ChocoId 'nodejs-lts' | Out-Null
                 Refresh-Path
-                $nv2 = (& node --version 2>&1).Trim()
+                $nv2 = "$(& node --version 2>&1)".Trim()
                 OK "node upgraded: $nv2"
                 Set-Result -Tool 'node' -Status 'Installed' -Version $nv2 -Path (Get-Command node).Source
             } else {
@@ -387,7 +389,7 @@ function Install-Node {
         $nodeDir = Split-Path $found -Parent
         Add-UserPathEntry $nodeDir | Out-Null
         Refresh-Path
-        $nv = (& node --version 2>&1).Trim()
+        $nv = "$(& node --version 2>&1)".Trim()
         OK "Found existing Node $nv at: $found (PATH fixed)"
         Set-Result -Tool 'node' -Status 'PathFixed' -Version $nv -Path $found
         return
@@ -407,7 +409,7 @@ function Install-Node {
     Refresh-Path
     $nodeCmd = Get-Command node -ErrorAction SilentlyContinue
     if ($nodeCmd) {
-        $nv = (& node --version 2>&1).Trim()
+        $nv = "$(& node --version 2>&1)".Trim()
         OK "Node $nv installed: $($nodeCmd.Source)"
         Set-Result -Tool 'node' -Status 'Installed' -Version $nv -Path $nodeCmd.Source
 
@@ -430,7 +432,7 @@ Refresh-Path
 function Install-Git {
     $gitCmd = Get-Command git -ErrorAction SilentlyContinue
     if ($gitCmd) {
-        $gv = (& git --version 2>&1).Trim()
+        $gv = "$(& git --version 2>&1)".Trim()
         OK "$gv  ($($gitCmd.Source))"
         Set-Result -Tool 'git' -Status 'AlreadyInstalled' -Version ($gv -replace '^git version\s+','') -Path $gitCmd.Source
     } else {
@@ -448,7 +450,7 @@ function Install-Git {
         Refresh-Path
         $gitCmd = Get-Command git -ErrorAction SilentlyContinue
         if ($gitCmd) {
-            $gv = (& git --version 2>&1).Trim()
+            $gv = "$(& git --version 2>&1)".Trim()
             OK "Git installed: $gv"
             Set-Result -Tool 'git' -Status 'Installed' -Version ($gv -replace '^git version\s+','') -Path $gitCmd.Source
         } else {
@@ -506,7 +508,7 @@ function Install-GitHubCLI {
     $ghCmd = Get-Command gh -ErrorAction SilentlyContinue
     if ($ghCmd) {
         try {
-            $ghv = (& gh --version 2>&1 | Select-Object -First 1).Trim()
+            $ghv = "$(& gh --version 2>&1 | Select-Object -First 1)".Trim()
             OK "$ghv  ($($ghCmd.Source))"
             $verOnly = $ghv -replace '^gh version\s+(\S+).*','$1'
             Set-Result -Tool 'gh' -Status 'AlreadyInstalled' -Version $verOnly -Path $ghCmd.Source
@@ -532,7 +534,7 @@ function Install-GitHubCLI {
     Refresh-Path
     $ghCmd = Get-Command gh -ErrorAction SilentlyContinue
     if ($ghCmd) {
-        $ghv = (& gh --version 2>&1 | Select-Object -First 1).Trim()
+        $ghv = "$(& gh --version 2>&1 | Select-Object -First 1)".Trim()
         OK "GitHub CLI installed: $ghv"
         Set-Result -Tool 'gh' -Status 'Installed' -Version ($ghv -replace '^gh version\s+(\S+).*','$1') -Path $ghCmd.Source
     } else {
@@ -551,7 +553,7 @@ function Install-SupabaseCLI {
     $sbCmd = Get-Command supabase -ErrorAction SilentlyContinue
     if ($sbCmd) {
         try {
-            $sbv = (& supabase --version 2>&1).Trim()
+            $sbv = "$(& supabase --version 2>&1)".Trim()
             OK "supabase $sbv  ($($sbCmd.Source))"
             Set-Result -Tool 'supabase' -Status 'AlreadyInstalled' -Version $sbv -Path $sbCmd.Source
         } catch {
@@ -574,7 +576,9 @@ function Install-SupabaseCLI {
     }
 
     Info "Installing Supabase CLI via npm install -g supabase..."
-    & npm install -g supabase 2>&1 | Out-Host
+    # No 2>&1: PS 5.1 wraps native stderr in ErrorRecord, making npm warnings look
+    # like fatal PowerShell errors. Stderr still prints to console without it.
+    & npm.cmd install -g supabase | Out-Host
     if ($LASTEXITCODE -ne 0) {
         Fail "npm install -g supabase failed (exit code $LASTEXITCODE)"
         Set-Result -Tool 'supabase' -Status 'Failed' -Notes "npm exit $LASTEXITCODE"
@@ -583,7 +587,7 @@ function Install-SupabaseCLI {
     Refresh-Path
     $sbCmd = Get-Command supabase -ErrorAction SilentlyContinue
     if ($sbCmd) {
-        $sbv = (& supabase --version 2>&1).Trim()
+        $sbv = "$(& supabase --version 2>&1)".Trim()
         OK "Supabase CLI installed: $sbv"
         Set-Result -Tool 'supabase' -Status 'Installed' -Version $sbv -Path $sbCmd.Source
     } else {
@@ -602,7 +606,7 @@ function Install-VercelCLI {
     $vcCmd = Get-Command vercel -ErrorAction SilentlyContinue
     if ($vcCmd) {
         try {
-            $vcv = (& vercel --version 2>&1).Trim()
+            $vcv = "$(& vercel --version 2>&1)".Trim()
             OK "vercel $vcv  ($($vcCmd.Source))"
             Set-Result -Tool 'vercel' -Status 'AlreadyInstalled' -Version $vcv -Path $vcCmd.Source
         } catch {
@@ -625,7 +629,7 @@ function Install-VercelCLI {
     }
 
     Info "Installing Vercel CLI via npm install -g vercel..."
-    & npm install -g vercel 2>&1 | Out-Host
+    & npm.cmd install -g vercel | Out-Host
     if ($LASTEXITCODE -ne 0) {
         Fail "npm install -g vercel failed (exit code $LASTEXITCODE)"
         Set-Result -Tool 'vercel' -Status 'Failed' -Notes "npm exit $LASTEXITCODE"
@@ -634,7 +638,7 @@ function Install-VercelCLI {
     Refresh-Path
     $vcCmd = Get-Command vercel -ErrorAction SilentlyContinue
     if ($vcCmd) {
-        $vcv = (& vercel --version 2>&1).Trim()
+        $vcv = "$(& vercel --version 2>&1)".Trim()
         OK "Vercel CLI installed: $vcv"
         Set-Result -Tool 'vercel' -Status 'Installed' -Version $vcv -Path $vcCmd.Source
     } else {
@@ -653,7 +657,7 @@ if (-not $SkipClaudeCode -and -not $DiagnoseOnly) {
     $existing = Get-Command claude -ErrorAction SilentlyContinue
     if ($existing) {
         try {
-            $cv = (& claude --version 2>&1).Trim()
+            $cv = "$(& claude --version 2>&1)".Trim()
             OK "Claude Code already installed: $cv  ($($existing.Source))"
             Set-Result -Tool 'claude' -Status 'AlreadyInstalled' -Version $cv -Path $existing.Source
         } catch {
@@ -663,26 +667,19 @@ if (-not $SkipClaudeCode -and -not $DiagnoseOnly) {
     } else {
         $installed = $false
 
-        # Method 1: Anthropic's native Windows installer (bundles its own runtime, no Node needed)
-        Info "Trying official native installer..."
-        try {
-            $installScript = Invoke-RestMethod -Uri "https://claude.ai/install.ps1" -UseBasicParsing
-            Invoke-Expression $installScript
-            $installed = $true
-            OK "Claude Code installed via native installer"
-        } catch {
-            Warn "Native installer failed: $($_.Exception.Message)"
-        }
-
-        # Method 2: npm fallback (requires npm available, which it should be after Install-Node)
-        if (-not $installed -and (Get-Command npm -ErrorAction SilentlyContinue)) {
-            Info "Falling back to npm install -g @anthropic-ai/claude-code"
-            try {
-                & npm install -g "@anthropic-ai/claude-code" 2>&1 | Out-Host
+        # npm only: the native installer (claude.ai/install.ps1) runs `claude install`
+        # interactively for shell integration, which silently hangs when invoked via
+        # Invoke-Expression. npm install is non-interactive and gives the same CLI.
+        if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
+            Fail "npm not available - cannot install Claude Code. Node should have been installed earlier."
+        } else {
+            Info "Installing Claude Code via npm install -g @anthropic-ai/claude-code..."
+            & npm.cmd install -g "@anthropic-ai/claude-code" | Out-Host
+            if ($LASTEXITCODE -eq 0) {
                 $installed = $true
                 OK "Claude Code installed via npm"
-            } catch {
-                Fail "npm install also failed: $_"
+            } else {
+                Fail "npm install failed (exit code $LASTEXITCODE)"
             }
         }
 
@@ -704,7 +701,7 @@ if (-not $SkipClaudeCode -and -not $DiagnoseOnly) {
                 Refresh-Path
                 OK "Claude Code binary: $claudeFound"
                 try {
-                    $cv = (& claude --version 2>&1).Trim()
+                    $cv = "$(& claude --version 2>&1)".Trim()
                     Set-Result -Tool 'claude' -Status 'Installed' -Version $cv -Path $claudeFound
                 } catch {
                     Set-Result -Tool 'claude' -Status 'Installed' -Path $claudeFound -Notes "Installed but --version failed: $_"
@@ -725,13 +722,13 @@ if (-not $script:results.Contains('claude')) {
         $existing = Get-Command claude -ErrorAction SilentlyContinue
         if ($existing) {
             try {
-                $cv = (& claude --version 2>&1).Trim()
+                $cv = "$(& claude --version 2>&1)".Trim()
                 Set-Result -Tool 'claude' -Status 'AlreadyInstalled' -Version $cv -Path $existing.Source
             } catch {
                 Set-Result -Tool 'claude' -Status 'Failed' -Path $existing.Source -Notes "Found but --version failed"
             }
         } else {
-            Set-Result -Tool 'claude' -Status 'Skipped' -Notes "Would install via native installer or npm"
+            Set-Result -Tool 'claude' -Status 'Skipped' -Notes "Would install via npm"
         }
     }
 }
@@ -748,7 +745,8 @@ foreach ($tool in $reverify) {
     $cmd = Get-Command $tool -ErrorAction SilentlyContinue
     if ($cmd -and $cmd.Source -notmatch '\\WindowsApps\\') {
         try {
-            $v = (& $tool --version 2>&1 | Select-Object -First 1).Trim()
+            $exe = if ($tool -eq 'npm') { 'npm.cmd' } else { $tool }
+            $v = "$(& $exe --version 2>&1 | Select-Object -First 1)".Trim()
             # Only update if we don't already have a richer entry
             if (-not $script:results.Contains($tool)) {
                 Set-Result -Tool $tool -Status 'AlreadyInstalled' -Version $v -Path $cmd.Source
