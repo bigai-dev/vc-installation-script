@@ -256,15 +256,22 @@ if ($totalLen -gt 1024) {
 Step "Checking Python"
 Refresh-Path
 
+# Enumerate every python.exe under the install roots winget AND choco use.
+# Choco installs to C:\Python314\, winget to %LOCALAPPDATA%\Programs\Python\Python314\.
+function Find-PythonInstalls {
+    $found = @()
+    $found += Get-ChildItem -Path "$env:LOCALAPPDATA\Programs\Python" -Filter "python.exe" -Recurse -ErrorAction SilentlyContinue
+    $found += Get-ChildItem -Path "$env:ProgramFiles\Python*" -Filter "python.exe" -ErrorAction SilentlyContinue
+    $found += Get-ChildItem -Path "${env:ProgramFiles(x86)}\Python*" -Filter "python.exe" -ErrorAction SilentlyContinue
+    $found += Get-ChildItem -Path "C:\Python*" -Filter "python.exe" -ErrorAction SilentlyContinue
+    return @($found | Where-Object { $_.FullName -notmatch '\\WindowsApps\\' })
+}
+
 function Install-Python {
     $pythonExe = $null
 
     # 1. Enumerate ALL python.exe under common install roots (don't trust Get-Command order)
-    $pyCandidates = @()
-    $pyCandidates += Get-ChildItem -Path "$env:LOCALAPPDATA\Programs\Python" -Filter "python.exe" -Recurse -ErrorAction SilentlyContinue
-    $pyCandidates += Get-ChildItem -Path "$env:ProgramFiles\Python*" -Filter "python.exe" -ErrorAction SilentlyContinue
-    $pyCandidates += Get-ChildItem -Path "${env:ProgramFiles(x86)}\Python*" -Filter "python.exe" -ErrorAction SilentlyContinue
-    $pyCandidates = $pyCandidates | Where-Object { $_.FullName -notmatch '\\WindowsApps\\' }
+    $pyCandidates = Find-PythonInstalls
 
     # 2. Pick the highest-version install
     $best = $null
@@ -323,8 +330,10 @@ function Install-Python {
     }
     Refresh-Path
 
-    # Re-find after install
-    $newPath = Get-ChildItem -Path "$env:LOCALAPPDATA\Programs\Python\Python314" -Filter "python.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+    # Re-find after install. Re-enumerate roots so we catch both winget AND choco paths.
+    $newPath = Find-PythonInstalls |
+        Where-Object { ((& $_.FullName --version 2>&1) -replace '^Python\s+','') -match '^3\.14' } |
+        Select-Object -First 1
     if ($newPath) {
         $pyDir = Split-Path $newPath.FullName -Parent
         $scriptsDir = Join-Path $pyDir "Scripts"
@@ -608,7 +617,7 @@ function Install-VercelCLI {
     $vcCmd = Get-Command vercel -ErrorAction SilentlyContinue
     if ($vcCmd) {
         try {
-            $vcv = "$(& vercel --version 2>&1)".Trim()
+            $vcv = "$(& vercel --version 2>&1 | Select-Object -First 1)".Trim()
             OK "vercel $vcv  ($($vcCmd.Source))"
             Set-Result -Tool 'vercel' -Status 'AlreadyInstalled' -Version $vcv -Path $vcCmd.Source
         } catch {
@@ -640,7 +649,7 @@ function Install-VercelCLI {
     Refresh-Path
     $vcCmd = Get-Command vercel -ErrorAction SilentlyContinue
     if ($vcCmd) {
-        $vcv = "$(& vercel --version 2>&1)".Trim()
+        $vcv = "$(& vercel --version 2>&1 | Select-Object -First 1)".Trim()
         OK "Vercel CLI installed: $vcv"
         Set-Result -Tool 'vercel' -Status 'Installed' -Version $vcv -Path $vcCmd.Source
     } else {
