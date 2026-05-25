@@ -481,7 +481,6 @@ function Install-Git {
         $existingName  = (& git config --global user.name 2>$null)
         $existingEmail = (& git config --global user.email 2>$null)
         if ([string]::IsNullOrWhiteSpace($existingName) -or [string]::IsNullOrWhiteSpace($existingEmail)) {
-            $script:GitIdentityMissing = $true
             Warn "git user.name / user.email not set - configure before your first commit (see end of run)."
         } else {
             OK "git user.name = $existingName"
@@ -786,33 +785,26 @@ if ($DiagnoseOnly) {
 } elseif ($allGood) {
     Say "  All tools are working in THIS PowerShell window." Green
     Write-Host ""
-    Say "  Next steps - sign in to each CLI (run these in this same window):" White
+    Say "  Next steps - run these in this same window:" White
     Say "      gh auth login" White
     Say "      supabase login" White
     Say "      vercel login" White
+    Say "      git config --global user.name `"Your Name`"" White
+    Say "      git config --global user.email `"you@example.com`"" White
     Write-Host ""
-    Say "  (Each will open a browser. Follow the prompts.)" Gray
-    if ($script:GitIdentityMissing) {
-        Write-Host ""
-        Say "  Before your first git commit, set your identity:" Yellow
-        Say "      git config --global user.name `"Your Name`"" White
-        Say "      git config --global user.email `"you@example.com`"" White
-    }
+    Say "  (The first three open a browser. The git ones set your commit identity.)" Gray
 } else {
     Say "  Some tools failed. See the table above." Yellow
     Say "  Try closing this window and opening a fresh PowerShell as Administrator," Yellow
     Say "  then re-run this script. If the same tools fail again, share the log:" Yellow
     if ($script:LogPath) { Say "      $($script:LogPath)" White }
     Write-Host ""
-    Say "  Next steps once all tools are working - sign in to each CLI:" Gray
+    Say "  Next steps once all tools are working:" Gray
     Say "      gh auth login" Gray
     Say "      supabase login" Gray
     Say "      vercel login" Gray
-    if ($script:GitIdentityMissing) {
-        Say "  Before your first git commit:" Gray
-        Say "      git config --global user.name `"Your Name`"" Gray
-        Say "      git config --global user.email `"you@example.com`"" Gray
-    }
+    Say "      git config --global user.name `"Your Name`"" Gray
+    Say "      git config --global user.email `"you@example.com`"" Gray
 }
 $elapsed = (Get-Date) - $script:StartTime
 Say ("  Total time: {0} min {1:D2} sec" -f [int]$elapsed.TotalMinutes, $elapsed.Seconds) Gray
