@@ -43,6 +43,8 @@ param(
 $ErrorActionPreference = "Continue"
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
+$script:StartTime = Get-Date
+
 # --- Session log (only in fix mode; transcript adds noise to diagnose output) ---
 $script:LogPath = $null
 if (-not $DiagnoseOnly) {
@@ -811,6 +813,8 @@ if ($DiagnoseOnly) {
     Say "      supabase login" Gray
     Say "      vercel login" Gray
 }
+$elapsed = (Get-Date) - $script:StartTime
+Say ("  Total time: {0} min {1:D2} sec" -f [int]$elapsed.TotalMinutes, $elapsed.Seconds) Gray
 Say "  PATH backups: $backupDir" Gray
 Say "=================================================================" Cyan
 Write-Host ""
