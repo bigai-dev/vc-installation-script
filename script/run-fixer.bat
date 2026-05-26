@@ -87,19 +87,38 @@ set "PS_SCRIPT=%~dp0fix-vibecode.ps1"
 
 if not exist "%PS_SCRIPT%" (
     echo [%date% %time%] PS script not found: %PS_SCRIPT% >> "%LOG_FILE%"
+    cls
     echo.
     echo  ==================================================================
-    echo   ERROR: Could not find fix-vibecode.ps1
+    echo    ERROR: fix-vibecode.ps1 is MISSING from this folder
     echo  ==================================================================
     echo.
-    echo   Expected location:
-    echo     %PS_SCRIPT%
+    echo    I looked here:
+    echo      %PS_SCRIPT%
     echo.
-    echo   Make sure both files are in the same folder:
-    echo     - run-fixer.bat       (this file)
-    echo     - fix-vibecode.ps1    (the PowerShell script)
+    echo    But this folder only contains:
+    echo  ------------------------------------------------------------------
+    dir /b "%~dp0"
+    echo  ------------------------------------------------------------------
     echo.
-    echo   Log file: %LOG_FILE%
+    echo    HOW TO FIX
+    echo    ----------
+    echo    Both files MUST sit side-by-side in the SAME folder:
+    echo      - run-fixer.bat       (this file)
+    echo      - fix-vibecode.ps1    (the PowerShell script)
+    echo.
+    echo    Most common cause: you only copied run-fixer.bat across
+    echo    (for example, dragged it alone into Windows Sandbox).
+    echo.
+    echo    Easiest fix: go to GitHub, click the green Code button,
+    echo    pick "Download ZIP", unzip it, then run THIS .bat from
+    echo    inside the unzipped 'script' folder.
+    echo.
+    echo      https://github.com/bigai-dev/windows-vc-script
+    echo.
+    echo    Log file: %LOG_FILE%
+    echo.
+    echo  ==================================================================
     echo.
     echo  Press any key to close this window...
     pause >nul
