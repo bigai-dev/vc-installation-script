@@ -321,6 +321,17 @@ function Find-PythonInstalls {
     $found += Get-ChildItem -Path "$env:ProgramFiles\Python*\python.exe" -ErrorAction SilentlyContinue
     $found += Get-ChildItem -Path "${env:ProgramFiles(x86)}\Python*\python.exe" -ErrorAction SilentlyContinue
     $found += Get-ChildItem -Path "C:\Python*\python.exe" -ErrorAction SilentlyContinue
+
+    # Targeted alternates: Scoop, Anaconda/Miniconda, D:/E: drive installs.
+    # Cheap Test-Path checks - safe when drives or folders don't exist.
+    $found += Get-ChildItem -Path "$env:USERPROFILE\scoop\apps\python*\current\python.exe" -ErrorAction SilentlyContinue
+    foreach ($conda in @("$env:USERPROFILE\anaconda3\python.exe", "$env:USERPROFILE\miniconda3\python.exe")) {
+        if (Test-Path $conda) { $found += Get-Item $conda }
+    }
+    foreach ($drive in @('D:','E:')) {
+        $found += Get-ChildItem -Path "$drive\Python*\python.exe" -ErrorAction SilentlyContinue
+    }
+
     return @($found | Where-Object { $_.FullName -notmatch '\\WindowsApps\\' })
 }
 
@@ -450,7 +461,12 @@ function Install-Node {
     $nodeCandidates = @(
         "$env:ProgramFiles\nodejs\node.exe",
         "${env:ProgramFiles(x86)}\nodejs\node.exe",
-        "$env:LOCALAPPDATA\Programs\nodejs\node.exe"
+        "$env:LOCALAPPDATA\Programs\nodejs\node.exe",
+        # Targeted alternates: Scoop and D:/E: drive installs.
+        "$env:USERPROFILE\scoop\apps\nodejs\current\node.exe",
+        "$env:USERPROFILE\scoop\apps\nodejs-lts\current\node.exe",
+        "D:\nodejs\node.exe",
+        "E:\nodejs\node.exe"
     )
     $found = $nodeCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
     if ($found) {
