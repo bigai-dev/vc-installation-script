@@ -45,6 +45,18 @@ $ErrorActionPreference = "Continue"
 
 $script:StartTime = Get-Date
 
+# Force the console into UTF-8 so winget/npm output (which is UTF-8) renders
+# correctly on systems with a non-Latin OEM code page (e.g. CP936 Chinese).
+# Without this, output appears as garbled characters like σ┐█µë┘.
+try {
+    $null = & chcp.com 65001
+    [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
+    [Console]::InputEncoding  = [System.Text.UTF8Encoding]::new()
+    $OutputEncoding           = [System.Text.UTF8Encoding]::new()
+} catch {
+    Write-Host "Could not switch console to UTF-8: $($_.Exception.Message)" -ForegroundColor Yellow
+}
+
 # --- Session log (only in fix mode; transcript adds noise to diagnose output) ---
 $script:LogPath = $null
 if (-not $DiagnoseOnly) {
@@ -163,7 +175,9 @@ function Invoke-PackageInstall {
         [string[]]$ChocoExtraArgs = @()
     )
     if ($script:PackageManager -eq 'winget') {
-        & winget install -e --id $WingetId --silent --accept-package-agreements --accept-source-agreements | Out-Host
+        # --disable-interactivity suppresses the spinner that prints as garbled
+        # / \ | - columns in classic Windows PowerShell when stdout is piped.
+        & winget install -e --id $WingetId --silent --disable-interactivity --accept-package-agreements --accept-source-agreements | Out-Host
     } elseif ($script:PackageManager -eq 'choco') {
         $chocoArgs = @('install', $ChocoId, '-y', '--no-progress') + $ChocoExtraArgs
         & choco @chocoArgs | Out-Host
