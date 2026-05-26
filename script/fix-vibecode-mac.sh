@@ -28,6 +28,15 @@
 #      bash fix-vibecode-mac.sh --skip-claude-code
 # =============================================================================
 
+# ---------- Bash-only guard (must run BEFORE any bash-specific syntax) ----------
+# If invoked via `sh fix-vibecode-mac.sh`, the shebang is ignored and we're in
+# POSIX sh mode (BASH_VERSION still set on macOS because /bin/sh IS bash, but
+# POSIXLY_CORRECT=y and process substitution `>()` fails at parse time).
+# Re-exec under real bash so the user doesn't have to retry.
+if [ -z "${BASH_VERSION:-}" ] || [ -n "${POSIXLY_CORRECT:-}" ]; then
+    exec bash "$0" "$@"
+fi
+
 set -u   # error on unset vars; we deliberately handle command failures by hand.
 
 # ---------- Flag parsing ----------
@@ -49,16 +58,26 @@ done
 START_EPOCH=$(date +%s)
 STAMP=$(date +%Y%m%d-%H%M%S)
 
+# ---------- Detect TTY BEFORE we redirect stdout to tee ----------
+# After `exec > >(tee ...)`, `[ -t 1 ]` returns false (stdout is a pipe),
+# so any TTY check has to happen here, while stdout is still the terminal.
+if [ -t 1 ]; then HAS_COLOR=1; else HAS_COLOR=0; fi
+
 # ---------- Session log (fix mode only) ----------
 LOG_PATH=""
 if [ "$DIAGNOSE_ONLY" -eq 0 ]; then
     LOG_PATH="/tmp/fix-vibecode-${STAMP}.log"
-    # tee everything from here on out to the log file
-    exec > >(tee -a "$LOG_PATH") 2>&1
+    # tee stdout/stderr to the log, but strip ANSI color codes from the log
+    # copy so it stays readable in `cat`/`less` while users still see colors.
+    ESC=$(printf '\033')
+    exec > >(tee >(sed "s/${ESC}\[[0-9;]*m//g" >> "$LOG_PATH")) 2>&1
+
+    # Print log path on any exit (clean or crash) so users know where to look.
+    trap 'echo ""; echo "Session log: '"$LOG_PATH"'"' EXIT
 fi
 
 # ---------- Output helpers (ANSI colors; falls back gracefully) ----------
-if [ -t 1 ]; then
+if [ "$HAS_COLOR" -eq 1 ]; then
     C_CYAN=$'\033[36m'; C_GREEN=$'\033[32m'; C_YELLOW=$'\033[33m'
     C_RED=$'\033[31m'; C_GRAY=$'\033[90m'; C_RESET=$'\033[0m'
 else
@@ -680,7 +699,4 @@ say "  Total time: $((ELAPSED / 60)) min $(printf '%02d' $((ELAPSED % 60))) sec"
 say "  Backups: $BACKUP_DIR" "$C_GRAY"
 say "=================================================================" "$C_CYAN"
 echo ""
-
-if [ -n "$LOG_PATH" ]; then
-    printf '%sSession log: %s%s\n' "$C_GRAY" "$LOG_PATH" "$C_RESET"
-fi
+# (Session log path is printed by the EXIT trap when LOG_PATH is set.)
