@@ -11,7 +11,7 @@ For workshop **assistants**. Student-facing prep guide: [VIBE_CODING_WORKSHOP_GU
 | OS | Student does this |
 |---|---|
 | **Windows** | Right-click `script/run-fixer.bat` → **Run as administrator** → click Yes on UAC |
-| **macOS** | Double-click `script/run-fixer.command` |
+| **macOS** | **Easiest:** paste one line into Terminal — no security block (see [macOS specifics](#macos-specifics)). Or double-click `script/run-fixer.command`. |
 
 Takes 5–10 min. Final table should be all green. Then run the 5 commands the script prints (3 logins, 2 git configs). Close window. Done.
 
@@ -26,6 +26,8 @@ Takes 5–10 min. Final table should be all green. Then run the 5 commands the s
 ---
 
 ## How students get the files
+
+> **macOS shortcut:** Mac students can skip this whole download — the one-line command in [macOS specifics](#macos-specifics) runs the fixer straight from the web and never hits the security block. The steps below are for Windows (and Macs that prefer double-clicking).
 
 **Do not say `git clone`** — they don't have git yet and won't know terminal commands.
 
@@ -55,17 +57,40 @@ Flags: `-DiagnoseOnly` (check only, no install), `-SkipClaudeCode`.
 
 ## macOS specifics
 
-**Gatekeeper blocks `.command`?** Send them to:
-- Ventura (13)+: **System Settings** → **Privacy & Security** → scroll down → **Open Anyway**
-- Monterey (12): **System Preferences** → **Security & Privacy** → **General** → **Open Anyway**
+Two ways to run it. **Prefer the one-line command** — it never triggers the macOS "unidentified developer" security block.
 
-**Double-click opens it in a text editor?** Run in Terminal: `chmod +x ` then drag `run-fixer.command` onto the Terminal window → Enter.
+### Easiest: one line in Terminal (no download, no security screen)
 
-**Xcode Command Line Tools** prompts a GUI installer the first time — 5–15 min typical, longer on slow Wi-Fi. After it finishes, re-run the script.
+1. Open Terminal: press **Cmd + Space**, type `Terminal`, press **Enter**.
+2. Paste this exact line and press **Enter**:
 
-**Homebrew install** asks for the student's macOS login password once. Cursor doesn't move while typing — normal.
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/bigai-dev/windows-vc-script/main/script/fix-vibecode-mac.sh)"
+```
+
+Why this skips the block: macOS only quarantines files that were *saved* from a browser. Here the script is piped straight from the web into `bash`, so it's never a downloaded file — Gatekeeper has nothing to flag.
+
+Flags (optional): add `-- --diagnose-only` or `-- --skip-claude-code` to the end of the line, e.g.
+`...fix-vibecode-mac.sh)" -- --diagnose-only`.
+
+### Alternative: double-click the launcher
+
+Double-click `script/run-fixer.command`. The **first time only**, macOS blocks it ("…cannot be opened because it is from an unidentified developer") because it came from a browser download. Clear it once:
+
+- **Ventura (13) and newer:** **System Settings** → **Privacy & Security** → scroll to the bottom → next to the message about `run-fixer.command`, click **Open Anyway** → confirm with Touch ID or password. Then double-click the file again — it runs.
+- **Monterey (12):** **System Preferences** → **Security & Privacy** → **General** tab → click **Open Anyway** → **Open**.
+
+You only do this once per Mac.
+
+**Double-click opens it in a text editor instead of running?** Just use the one-line method above — it always works.
 
 Flags: `--diagnose-only`, `--skip-claude-code`.
+
+### Either way
+
+**Xcode Command Line Tools** prompts a GUI installer the first time — 5–15 min typical, longer on slow Wi-Fi. After it finishes, re-run.
+
+**Homebrew install** asks for the student's macOS login password once. The cursor doesn't move while typing — that's normal.
 
 ---
 
