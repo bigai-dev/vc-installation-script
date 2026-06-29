@@ -104,6 +104,31 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "C:\path\to\script\fix-vibec
 | Vercel | `npm i -g vercel` |
 | Claude Code | `npm i -g @anthropic-ai/claude-code` |
 
+**Antivirus deleted the script / nothing will run?** Paste these commands straight into the terminal instead — there's no file on disk for antivirus to quarantine.
+
+_Windows — PowerShell as administrator. Run block 1, then **close the window and open a fresh one**, then run block 2:_
+```powershell
+winget install -e --id Python.Python.3.14
+winget install -e --id OpenJS.NodeJS.LTS
+winget install -e --id Git.Git
+winget install -e --id GitHub.cli
+```
+```powershell
+npm i -g supabase vercel @anthropic-ai/claude-code
+```
+> If the Python line can't find `3.14`, change it to `3.13` and run that one line again.
+
+_macOS — Terminal. Block 1 installs Homebrew + the base tools, block 2 finishes:_
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+brew install python@3.14 node git gh supabase/tap/supabase
+```
+```bash
+npm i -g vercel @anthropic-ai/claude-code
+```
+
+If antivirus also blocks the `npm i -g` line, tell it to **Allow** once (or pause protection for 10 min), then re-run that line. Sign in with the commands under [Done = all green](#done--all-green).
+
 ---
 
 ## Before each cohort
