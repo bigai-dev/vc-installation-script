@@ -112,16 +112,9 @@ macOS: use `python3 --version` for the first line.
 
 **Or paste this one block** — it finds all the tool folders for you, adds the missing ones to PATH (yours only, no duplicates), and tells you what it added. Then close the window and open a fresh one.
 
-_Windows — PowerShell:_
+_Windows — PowerShell (this is one single line — paste it and press Enter):_
 ```powershell
-$add = @()
-$py = (Get-ChildItem "$env:LOCALAPPDATA\Programs\Python\Python3*","C:\Python3*","C:\Program Files\Python3*" -Directory -EA 0 | Select-Object -Last 1).FullName
-if ($py) { $add += $py, "$py\Scripts" }
-$add += "C:\Program Files\nodejs", "C:\Program Files\Git\cmd", "C:\Program Files\GitHub CLI", "$env:APPDATA\npm"
-$u = [Environment]::GetEnvironmentVariable("Path","User")
-foreach ($f in $add) { if ((Test-Path $f) -and (($u -split ';') -notcontains $f)) { $u = "$u;$f"; Write-Host "Added: $f" } }
-[Environment]::SetEnvironmentVariable("Path", $u, "User")
-Write-Host "Done - close this window and open a fresh one."
+$add=@(); $py=(Get-ChildItem "$env:LOCALAPPDATA\Programs\Python\Python3*","C:\Python3*","C:\Program Files\Python3*" -Directory -EA 0 | Select-Object -Last 1).FullName; if ($py) { $add += $py, "$py\Scripts" }; $add += "C:\Program Files\nodejs","C:\Program Files\Git\cmd","C:\Program Files\GitHub CLI","$env:APPDATA\npm"; $u=[Environment]::GetEnvironmentVariable("Path","User"); foreach ($f in $add) { if ((Test-Path $f) -and (($u -split ';') -notcontains $f)) { $u="$u;$f"; Write-Host "Added: $f" } }; [Environment]::SetEnvironmentVariable("Path",$u,"User"); Write-Host "Done - close this window and open a fresh one."
 ```
 
 _macOS — Terminal:_
