@@ -22,15 +22,15 @@ Takes 5–10 min. When the final table is all green, the student runs the 5 comm
 ---
 
 <details>
-<summary><b>✅ Done = all green</b> — what the table means + sign-in steps</summary>
+<summary><b>Done = all green</b> — what the table means + sign-in steps</summary>
 
 <br>
 
 | Row says | Means |
 |---|---|
-| `Installed` / `AlreadyInstalled` / `PathFixed` | ✅ good |
+| `Installed` / `AlreadyInstalled` / `PathFixed` | good |
 | `Skipped` | diagnose mode or skipped Claude Code |
-| `Failed` | ❌ read the `note:` line under the row |
+| `Failed` | read the `note:` line under the row |
 
 Then the student signs in and sets their name:
 
@@ -60,7 +60,7 @@ macOS: use `python3 --version` for the first line.
 </details>
 
 <details>
-<summary><b>📅 On the day</b> — Wi-Fi, timing, and what's normal</summary>
+<summary><b>On the day</b> — Wi-Fi, timing, and what's normal</summary>
 
 <br>
 
@@ -72,7 +72,7 @@ macOS: use `python3 --version` for the first line.
 </details>
 
 <details>
-<summary><b>🔧 When it breaks</b> — quick fixes + where the logs are</summary>
+<summary><b>When it breaks</b> — quick fixes + where the logs are</summary>
 
 <br>
 
@@ -91,7 +91,7 @@ macOS: use `python3 --version` for the first line.
 </details>
 
 <details>
-<summary><b>🛣️ "command not found" even after it installed</b> — what PATH does + manual fix</summary>
+<summary><b>"command not found" even after it installed</b> — what PATH does + manual fix</summary>
 
 <br>
 
@@ -121,7 +121,7 @@ echo 'export PATH="/opt/homebrew/bin:$PATH"' >> ~/.zshrc && source ~/.zshrc
 </details>
 
 <details>
-<summary><b>🧩 Options &amp; fallbacks</b> — diagnose mode, manual run</summary>
+<summary><b>Options &amp; fallbacks</b> — diagnose mode, manual run</summary>
 
 <br>
 
@@ -137,7 +137,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "C:\path\to\script\fix-vibec
 </details>
 
 <details>
-<summary><b>🛡️ Script won't run / antivirus deleted it</b> — install everything by hand</summary>
+<summary><b>Script won't run / antivirus deleted it</b> — install everything by hand</summary>
 
 <br>
 
@@ -185,7 +185,7 @@ Sign in with the commands under **Done = all green** above.
 </details>
 
 <details>
-<summary><b>🧪 Before each cohort</b> — clean-VM test</summary>
+<summary><b>Before each cohort</b> — clean-VM test</summary>
 
 <br>
 
