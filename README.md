@@ -106,15 +106,28 @@ macOS: use `python3 --version` for the first line.
 - Skips folders that don't exist and removes duplicate entries.
 - Backs up your PATH first, so it's always reversible (locations above).
 
-**Still missing after a fresh window?** Add the folder by hand, then open a new window:
+**Still missing after a fresh window?** The safe fix is to **re-run the script** — it hunts down the right folder, adds it correctly, and backs up your PATH first. Do that before editing anything by hand.
 
-_Windows — PowerShell (swap in the real folder if it's somewhere else):_
+**Editing PATH by hand is a last resort.** Never paste a PATH command blind — a wrong one can wreck your PATH. Find the real folder first, then add **only that one folder**.
+
+_Step 1 — find where the tool actually landed:_
 ```powershell
-[Environment]::SetEnvironmentVariable("Path", $env:Path + ";C:\Path\To\Tool", "User")
+# Windows PowerShell — example uses python; change the name for other tools
+Get-ChildItem "$env:LOCALAPPDATA\Programs","C:\Program Files" -Recurse -Filter python.exe -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty DirectoryName
+```
+```bash
+# macOS Terminal — example uses node; change the name for other tools
+which node || ls /opt/homebrew/bin /usr/local/bin | grep node
 ```
 
-_macOS — Terminal (this is the usual Homebrew location):_
+_Step 2 — add that exact folder, then open a fresh window:_
+```powershell
+# Windows — paste the folder you found from Step 1 between the quotes
+$folder = "PASTE_THE_FOLDER_HERE"
+[Environment]::SetEnvironmentVariable("Path", [Environment]::GetEnvironmentVariable("Path","User") + ";$folder", "User")
+```
 ```bash
+# macOS — use the folder from Step 1 (drop the tool name off the end)
 echo 'export PATH="/opt/homebrew/bin:$PATH"' >> ~/.zshrc && source ~/.zshrc
 ```
 
