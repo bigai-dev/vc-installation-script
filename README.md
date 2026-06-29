@@ -110,14 +110,31 @@ macOS: use `python3 --version` for the first line.
 
 **Editing PATH by hand is a last resort.** Never paste a PATH command blind — a wrong one can wreck your PATH. Find the real folder first, then add **only that one folder**.
 
-_Step 1 — find where the tool actually landed:_
+_Step 1 — find the folder. Most tools land in a known spot._
+
+**Windows:**
+
+| Tool | Folder to add |
+|---|---|
+| Python | `%LOCALAPPDATA%\Programs\Python\Python314` and `...\Python314\Scripts` |
+| Node.js | `C:\Program Files\nodejs` |
+| Git | `C:\Program Files\Git\cmd` |
+| GitHub CLI | `C:\Program Files\GitHub CLI` |
+| Supabase / Vercel / Claude Code | `%APPDATA%\npm` |
+
+**macOS** — nearly everything (Python, Node, Git, GitHub CLI, Supabase, Vercel, Claude Code) lives in one folder:
+
+- Apple Silicon Macs (M1/M2/M3/M4): `/opt/homebrew/bin`
+- Older Intel Macs: `/usr/local/bin`
+
+Not in the spot above? Search for it (change `python.exe` / `node` to the tool you want):
 ```powershell
-# Windows PowerShell — example uses python; change the name for other tools
+# Windows
 Get-ChildItem "$env:LOCALAPPDATA\Programs","C:\Program Files" -Recurse -Filter python.exe -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty DirectoryName
 ```
 ```bash
-# macOS Terminal — example uses node; change the name for other tools
-which node || ls /opt/homebrew/bin /usr/local/bin | grep node
+# macOS
+ls /opt/homebrew/bin /usr/local/bin | grep node
 ```
 
 _Step 2 — add that exact folder, then open a fresh window:_
