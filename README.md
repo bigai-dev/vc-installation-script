@@ -91,6 +91,36 @@ macOS: use `python3 --version` for the first line.
 </details>
 
 <details>
+<summary><b>🛣️ "command not found" even after it installed</b> — what PATH does + manual fix</summary>
+
+<br>
+
+**Plain version:** PATH is the list of folders the computer searches when you type a command. A tool can install perfectly but not be on that list yet — so the terminal says "command not found." The script fixes this for you, but the change only kicks in in a **brand-new** window.
+
+**The fix 9 times out of 10:** close the terminal completely, open a fresh one, run the smoke test again.
+
+**What the script does automatically:**
+
+- Finds where each tool actually landed and adds that folder to your PATH.
+- On Windows it edits PATH the safe way — never `setx`, which silently corrupts a long PATH.
+- Skips folders that don't exist and removes duplicate entries.
+- Backs up your PATH first, so it's always reversible (locations above).
+
+**Still missing after a fresh window?** Add the folder by hand, then open a new window:
+
+_Windows — PowerShell (swap in the real folder if it's somewhere else):_
+```powershell
+[Environment]::SetEnvironmentVariable("Path", $env:Path + ";C:\Path\To\Tool", "User")
+```
+
+_macOS — Terminal (this is the usual Homebrew location):_
+```bash
+echo 'export PATH="/opt/homebrew/bin:$PATH"' >> ~/.zshrc && source ~/.zshrc
+```
+
+</details>
+
+<details>
 <summary><b>🧩 Options &amp; fallbacks</b> — diagnose mode, manual run</summary>
 
 <br>
