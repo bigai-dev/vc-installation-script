@@ -12,7 +12,7 @@ Student prep guide → [VIBE_CODING_WORKSHOP_GUIDE.md](VIBE_CODING_WORKSHOP_GUID
 **macOS** — open Terminal (Cmd+Space → type `Terminal` → Enter), paste this one line, press Enter:
 
 ```bash
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/bigai-dev/windows-vc-script/main/script/fix-vibecode-mac.sh)"
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/bigai-dev/vc-installation-script/main/script/fix-vibecode-mac.sh)"
 ```
 
 **Windows** — on GitHub, green **Code** button → **Download ZIP** → **Extract All**. Open the `script` folder, right-click `run-fixer.bat` → **Run as administrator** → **Yes**.
@@ -155,6 +155,6 @@ If antivirus also blocks the `npm i -g` line, tell it to **Allow** once (or paus
 
 <br>
 
-Run [docs/MANUAL-VM-TEST.md](docs/MANUAL-VM-TEST.md) on a clean VM (~30 min — has caught real bugs). Found a bug? [Open an issue](https://github.com/bigai-dev/windows-vc-script/issues) with the log, a screenshot of the final table, and the OS version.
+Run [docs/MANUAL-VM-TEST.md](docs/MANUAL-VM-TEST.md) on a clean VM (~30 min — has caught real bugs). Found a bug? [Open an issue](https://github.com/bigai-dev/vc-installation-script/issues) with the log, a screenshot of the final table, and the OS version.
 
 </details>

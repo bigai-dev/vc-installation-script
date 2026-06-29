@@ -152,7 +152,7 @@ echo    Easiest fix: go to GitHub, click the green Code button,
 echo    pick Download ZIP, unzip it, then run THIS .bat from
 echo    inside the unzipped 'script' folder.
 echo.
-echo      https://github.com/bigai-dev/windows-vc-script
+echo      https://github.com/bigai-dev/vc-installation-script
 echo.
 echo    Log file: %LOG_FILE%
 echo.
