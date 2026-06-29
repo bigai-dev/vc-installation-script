@@ -91,7 +91,7 @@ macOS: use `python3 --version` for the first line.
 </details>
 
 <details>
-<summary><b>🧩 Options &amp; fallbacks</b> — diagnose mode, manual run, install by hand</summary>
+<summary><b>🧩 Options &amp; fallbacks</b> — diagnose mode, manual run</summary>
 
 <br>
 
@@ -104,26 +104,16 @@ macOS: use `python3 --version` for the first line.
 powershell -NoProfile -ExecutionPolicy Bypass -File "C:\path\to\script\fix-vibecode.ps1"
 ```
 
-**Install by hand** (if the script can't run at all) — Node before the npm tools:
-
-| Tool | Where |
-|---|---|
-| Python 3.14 | <https://www.python.org/downloads/> (Windows: tick "Add to PATH") |
-| Node.js LTS | <https://nodejs.org/en/download> |
-| Git | <https://git-scm.com/downloads> |
-| GitHub CLI | <https://cli.github.com/> |
-| Supabase | macOS `brew install supabase/tap/supabase` · Windows `npm i -g supabase` |
-| Vercel | `npm i -g vercel` |
-| Claude Code | `npm i -g @anthropic-ai/claude-code` |
-
 </details>
 
 <details>
-<summary><b>🛡️ Antivirus deleted the script / nothing will run?</b> — paste-to-install, no file needed</summary>
+<summary><b>🛡️ Script won't run / antivirus deleted it</b> — install everything by hand</summary>
 
 <br>
 
-Paste these commands straight into the terminal instead — there's no file on disk for antivirus to quarantine.
+Two ways to put the 7 tools on a machine without the script. **Try the paste method first** — there's no file on disk for antivirus to quarantine.
+
+**Method 1 — paste the commands** (dodges antivirus)
 
 _Windows — PowerShell as administrator. Run block 1, then **close the window and open a fresh one**, then run block 2:_
 ```powershell
@@ -146,7 +136,21 @@ brew install python@3.14 node git gh supabase/tap/supabase
 npm i -g vercel @anthropic-ai/claude-code
 ```
 
-If antivirus also blocks the `npm i -g` line, tell it to **Allow** once (or pause protection for 10 min), then re-run that line. Sign in with the commands under **Done = all green** above.
+If antivirus also blocks the `npm i -g` line, tell it to **Allow** once (or pause protection for 10 min), then re-run that line.
+
+**Method 2 — download the installers yourself** (install Node before the npm tools)
+
+| Tool | Where |
+|---|---|
+| Python 3.14 | <https://www.python.org/downloads/> (Windows: tick "Add to PATH") |
+| Node.js LTS | <https://nodejs.org/en/download> |
+| Git | <https://git-scm.com/downloads> |
+| GitHub CLI | <https://cli.github.com/> |
+| Supabase | macOS `brew install supabase/tap/supabase` · Windows `npm i -g supabase` |
+| Vercel | `npm i -g vercel` |
+| Claude Code | `npm i -g @anthropic-ai/claude-code` |
+
+Sign in with the commands under **Done = all green** above.
 
 </details>
 
