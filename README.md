@@ -21,7 +21,10 @@ Takes 5–10 min. When the final table is all green, the student runs the 5 comm
 
 ---
 
-## Done = all green
+<details>
+<summary><b>✅ Done = all green</b> — what the table means + sign-in steps</summary>
+
+<br>
 
 | Row says | Means |
 |---|---|
@@ -54,18 +57,24 @@ claude --version
 
 macOS: use `python3 --version` for the first line.
 
----
+</details>
 
-## On the day
+<details>
+<summary><b>📅 On the day</b> — Wi-Fi, timing, and what's normal</summary>
+
+<br>
 
 - **Use a phone hotspot,** not venue Wi-Fi. 30 laptops downloading at once kills venue Wi-Fi. Switch back once the table is green.
 - **Silent for >10 min = stuck** → Ctrl+C, re-run. Under 3 min = it's just downloading, wait.
 - **Mac, first run:** an Xcode installer may pop up (5–15 min) and Homebrew asks for the Mac password once — both normal. The cursor won't move while typing the password.
 - Scripts are **safe to re-run** anytime.
 
----
+</details>
 
-## When it breaks
+<details>
+<summary><b>🔧 When it breaks</b> — quick fixes + where the logs are</summary>
+
+<br>
 
 | Symptom | Fix |
 |---|---|
@@ -79,9 +88,12 @@ macOS: use `python3 --version` for the first line.
 **Logs:** Windows `%TEMP%\fix-vibecode-*.log` · macOS `/tmp/fix-vibecode-*.log`
 **PATH backups:** Windows `%USERPROFILE%\path-backups\` · macOS `~/dotfile-backups/`
 
----
+</details>
 
-## Options & fallbacks
+<details>
+<summary><b>🧩 Options &amp; fallbacks</b> — diagnose mode, manual run, install by hand</summary>
+
+<br>
 
 **Check only, no install:** macOS — add `-- --diagnose-only` to the end of the one-liner. Windows — `-DiagnoseOnly`. (Skip Claude Code: `--skip-claude-code` / `-SkipClaudeCode`.)
 
@@ -104,7 +116,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "C:\path\to\script\fix-vibec
 | Vercel | `npm i -g vercel` |
 | Claude Code | `npm i -g @anthropic-ai/claude-code` |
 
-**Antivirus deleted the script / nothing will run?** Paste these commands straight into the terminal instead — there's no file on disk for antivirus to quarantine.
+</details>
+
+<details>
+<summary><b>🛡️ Antivirus deleted the script / nothing will run?</b> — paste-to-install, no file needed</summary>
+
+<br>
+
+Paste these commands straight into the terminal instead — there's no file on disk for antivirus to quarantine.
 
 _Windows — PowerShell as administrator. Run block 1, then **close the window and open a fresh one**, then run block 2:_
 ```powershell
@@ -127,10 +146,15 @@ brew install python@3.14 node git gh supabase/tap/supabase
 npm i -g vercel @anthropic-ai/claude-code
 ```
 
-If antivirus also blocks the `npm i -g` line, tell it to **Allow** once (or pause protection for 10 min), then re-run that line. Sign in with the commands under [Done = all green](#done--all-green).
+If antivirus also blocks the `npm i -g` line, tell it to **Allow** once (or pause protection for 10 min), then re-run that line. Sign in with the commands under **Done = all green** above.
 
----
+</details>
 
-## Before each cohort
+<details>
+<summary><b>🧪 Before each cohort</b> — clean-VM test</summary>
+
+<br>
 
 Run [docs/MANUAL-VM-TEST.md](docs/MANUAL-VM-TEST.md) on a clean VM (~30 min — has caught real bugs). Found a bug? [Open an issue](https://github.com/bigai-dev/windows-vc-script/issues) with the log, a screenshot of the final table, and the OS version.
+
+</details>
