@@ -106,46 +106,31 @@ macOS: use `python3 --version` for the first line.
 - Skips folders that don't exist and removes duplicate entries.
 - Backs up your PATH first, so it's always reversible (locations above).
 
-**Still missing after a fresh window?** The safe fix is to **re-run the script** — it hunts down the right folder, adds it correctly, and backs up your PATH first. Do that before editing anything by hand.
+**Still missing after a fresh window?** Two hands-off options:
 
-**Editing PATH by hand is a last resort.** Never paste a PATH command blind — a wrong one can wreck your PATH. Find the real folder first, then add **only that one folder**.
+**Easiest — re-run the script.** It finds every tool, fixes PATH, and backs it up first. Nothing to type.
 
-_Step 1 — find the folder. Most tools land in a known spot._
+**Or paste this one block** — it finds all the tool folders for you, adds the missing ones to PATH (yours only, no duplicates), and tells you what it added. Then close the window and open a fresh one.
 
-**Windows:**
-
-| Tool | Folder to add |
-|---|---|
-| Python | `%LOCALAPPDATA%\Programs\Python\Python314` and `...\Python314\Scripts` |
-| Node.js | `C:\Program Files\nodejs` |
-| Git | `C:\Program Files\Git\cmd` |
-| GitHub CLI | `C:\Program Files\GitHub CLI` |
-| Supabase / Vercel / Claude Code | `%APPDATA%\npm` |
-
-**macOS** — nearly everything (Python, Node, Git, GitHub CLI, Supabase, Vercel, Claude Code) lives in one folder:
-
-- Apple Silicon Macs (M1/M2/M3/M4): `/opt/homebrew/bin`
-- Older Intel Macs: `/usr/local/bin`
-
-Not in the spot above? Search for it (change `python.exe` / `node` to the tool you want):
+_Windows — PowerShell:_
 ```powershell
-# Windows
-Get-ChildItem "$env:LOCALAPPDATA\Programs","C:\Program Files" -Recurse -Filter python.exe -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty DirectoryName
-```
-```bash
-# macOS
-ls /opt/homebrew/bin /usr/local/bin | grep node
+$add = @()
+$py = (Get-ChildItem "$env:LOCALAPPDATA\Programs\Python\Python3*","C:\Python3*","C:\Program Files\Python3*" -Directory -EA 0 | Select-Object -Last 1).FullName
+if ($py) { $add += $py, "$py\Scripts" }
+$add += "C:\Program Files\nodejs", "C:\Program Files\Git\cmd", "C:\Program Files\GitHub CLI", "$env:APPDATA\npm"
+$u = [Environment]::GetEnvironmentVariable("Path","User")
+foreach ($f in $add) { if ((Test-Path $f) -and (($u -split ';') -notcontains $f)) { $u = "$u;$f"; Write-Host "Added: $f" } }
+[Environment]::SetEnvironmentVariable("Path", $u, "User")
+Write-Host "Done - close this window and open a fresh one."
 ```
 
-_Step 2 — add that exact folder, then open a fresh window:_
-```powershell
-# Windows — paste the folder you found from Step 1 between the quotes
-$folder = "PASTE_THE_FOLDER_HERE"
-[Environment]::SetEnvironmentVariable("Path", [Environment]::GetEnvironmentVariable("Path","User") + ";$folder", "User")
-```
+_macOS — Terminal:_
 ```bash
-# macOS — use the folder from Step 1 (drop the tool name off the end)
-echo 'export PATH="/opt/homebrew/bin:$PATH"' >> ~/.zshrc && source ~/.zshrc
+for d in /opt/homebrew/bin /usr/local/bin /Library/Frameworks/Python.framework/Versions/3.14/bin; do
+  [ -d "$d" ] && ! grep -qF "export PATH=\"$d:\$PATH\"" ~/.zshrc && echo "export PATH=\"$d:\$PATH\"" >> ~/.zshrc && echo "Added: $d"
+done
+source ~/.zshrc
+echo "Done - close this window and open a fresh one."
 ```
 
 </details>
