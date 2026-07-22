@@ -75,6 +75,11 @@ cat <<EOF
        supabase login
        vercel login
 
+ =================================================================
+   RAISE YOUR HAND and wait for a workshop assistant to check
+   this screen with you BEFORE you close this window.
+ =================================================================
+
 EOF
 
 read -r -p " Press Enter to close this window..." _

@@ -697,6 +697,11 @@ END_EPOCH=$(date +%s)
 ELAPSED=$((END_EPOCH - START_EPOCH))
 say "  Total time: $((ELAPSED / 60)) min $(printf '%02d' $((ELAPSED % 60))) sec" "$C_GRAY"
 say "  Backups: $BACKUP_DIR" "$C_GRAY"
+if [ "$DIAGNOSE_ONLY" -eq 0 ]; then
+    say "=================================================================" "$C_CYAN"
+    say "  RAISE YOUR HAND and wait for a workshop assistant to check" "$C_YELLOW"
+    say "  this screen with you BEFORE you close this window." "$C_YELLOW"
+fi
 say "=================================================================" "$C_CYAN"
 echo ""
 # (Session log path is printed by the EXIT trap when LOG_PATH is set.)

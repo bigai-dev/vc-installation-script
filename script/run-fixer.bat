@@ -78,6 +78,11 @@ echo    Log files:
 echo      .bat side: %LOG_FILE%
 echo      .ps1 side: see "Session log:" line above in %%TEMP%%
 echo.
+echo  =================================================================
+echo    RAISE YOUR HAND and wait for a workshop assistant to check
+echo    this screen with you BEFORE you close this window.
+echo  =================================================================
+echo.
 echo  Press any key to close this window...
 pause >nul
 endlocal
