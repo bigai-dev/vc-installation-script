@@ -1,5 +1,12 @@
 #!/usr/bin/env bash
 # =============================================================================
+#  VIBE CODING ACADEMY - OFFICIAL SETUP
+#  (c) 2026 Vibe Coding Academy. All Rights Reserved.
+#  For authorised Vibe Coding Academy participants only.
+#  Unauthorised redistribution, resale, rebranding, reproduction,
+#  or use in third-party training is prohibited.
+#  Origin ID: VCA-2026-09-A7F3C8
+# =============================================================================
 #  Vibe Code Workshop - macOS one-click fixer
 #  Double-click this file in Finder. Terminal opens automatically.
 # =============================================================================

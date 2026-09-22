@@ -116,3 +116,12 @@ If a scenario fails, capture and share:
 - The session log from `%TEMP%\fix-vibecode-*.log`
 - The PATH backup files from `%USERPROFILE%\path-backups\`
 - Screenshot of the final table
+
+---
+
+**VIBE CODING ACADEMY — OFFICIAL SETUP**  
+© 2026 Vibe Coding Academy. All Rights Reserved.  
+For authorised Vibe Coding Academy participants only.  
+Unauthorised redistribution, resale, rebranding, reproduction,  
+or use in third-party training is prohibited.  
+Origin ID: VCA-2026-09-A7F3C8

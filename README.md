@@ -200,3 +200,12 @@ Sign in with the commands under **Done = all green** above.
 Run [docs/MANUAL-VM-TEST.md](docs/MANUAL-VM-TEST.md) on a clean VM (~30 min — has caught real bugs). Found a bug? [Open an issue](https://github.com/bigai-dev/vc-installation-script/issues) with the log, a screenshot of the final table, and the OS version.
 
 </details>
+
+---
+
+**VIBE CODING ACADEMY — OFFICIAL SETUP**  
+© 2026 Vibe Coding Academy. All Rights Reserved.  
+For authorised Vibe Coding Academy participants only.  
+Unauthorised redistribution, resale, rebranding, reproduction,  
+or use in third-party training is prohibited.  
+Origin ID: VCA-2026-09-A7F3C8

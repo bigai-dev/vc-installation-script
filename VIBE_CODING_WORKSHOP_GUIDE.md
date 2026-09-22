@@ -373,3 +373,12 @@ You're almost there! Just a few last things to make sure you're ready for the wo
 - [ ] Step 9 — Laptop, charger, water bottle, jacket packed
 
 See you at the workshop! 🚀
+
+---
+
+**VIBE CODING ACADEMY — OFFICIAL SETUP**  
+© 2026 Vibe Coding Academy. All Rights Reserved.  
+For authorised Vibe Coding Academy participants only.  
+Unauthorised redistribution, resale, rebranding, reproduction,  
+or use in third-party training is prohibited.  
+Origin ID: VCA-2026-09-A7F3C8

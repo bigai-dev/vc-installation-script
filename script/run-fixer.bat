@@ -1,5 +1,12 @@
 @echo off
 REM ============================================================
+REM  VIBE CODING ACADEMY - OFFICIAL SETUP
+REM  (c) 2026 Vibe Coding Academy. All Rights Reserved.
+REM  For authorised Vibe Coding Academy participants only.
+REM  Unauthorised redistribution, resale, rebranding, reproduction,
+REM  or use in third-party training is prohibited.
+REM  Origin ID: VCA-2026-09-A7F3C8
+REM ============================================================
 REM  Vibe Code Workshop - One-Click Fixer
 REM  Double-click this file. That's it.
 REM ============================================================
