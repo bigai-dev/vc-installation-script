@@ -1,5 +1,7 @@
 # Vibe Coding Workshop — Setup Scripts
 
+[![Setup scripts tested on Windows and Mac](https://github.com/bigai-dev/vc-installation-script/actions/workflows/test-setup-scripts.yml/badge.svg)](https://github.com/bigai-dev/vc-installation-script/actions/workflows/test-setup-scripts.yml)
+
 For workshop **assistants.** One script installs everything a student needs:
 **Python 3.14 · Node.js · Git · GitHub CLI · Supabase CLI · Vercel CLI · Claude Code.**
 
@@ -30,7 +32,7 @@ Takes 5–10 min. When the final table is all green, the student runs the 5 comm
 |---|---|
 | `Installed` / `AlreadyInstalled` / `PathFixed` | good |
 | `Skipped` | diagnose mode or skipped Claude Code |
-| `Failed` | read the `note:` line under the row |
+| `Failed` | read the `note:` line under the row, and any `Fix:` lines printed just above the table |
 
 Then the student signs in and sets their name:
 
@@ -79,6 +81,9 @@ macOS: use `python3 --version` for the first line.
 | Symptom | Fix |
 |---|---|
 | "command not found" in smoke test | Close the window, open a fresh one. |
+| Red row with a `Fix:` line printed above the table | Do what the `Fix:` line says, then re-run. |
+| Red `node`: "Still v20…" (or another old version) | An older Node is in the way. Windows: Settings → Apps → uninstall **Node.js**, then re-run. Mac: ask the lead assistant. |
+| Mac: red `git` — "doesn't run" | Apple's developer tools broke (common after a macOS update). Run `xcode-select --install`, let it finish, re-run. |
 | Red `claude` / `supabase` / `vercel` | Fresh window, re-run. |
 | Mac: blocked / "unidentified developer" | Use the one-line method above — it never gets blocked. |
 | Mac: "no formula python@3.14" | `brew update`, then re-run. |
@@ -114,12 +119,12 @@ macOS: use `python3 --version` for the first line.
 
 _Windows — PowerShell (this is one single line — paste it and press Enter):_
 ```powershell
-$add=@(); $py=(Get-ChildItem "$env:LOCALAPPDATA\Programs\Python\Python3*","C:\Python3*","C:\Program Files\Python3*" -Directory -EA 0 | Select-Object -Last 1).FullName; if ($py) { $add += $py, "$py\Scripts" }; $add += "C:\Program Files\nodejs","C:\Program Files\Git\cmd","C:\Program Files\GitHub CLI","$env:APPDATA\npm"; $u=[Environment]::GetEnvironmentVariable("Path","User"); foreach ($f in $add) { if ((Test-Path $f) -and (($u -split ';') -notcontains $f)) { $u="$u;$f"; Write-Host "Added: $f" } }; [Environment]::SetEnvironmentVariable("Path",$u,"User"); Write-Host "Done - close this window and open a fresh one."
+$add=@(); $py=(Get-ChildItem "$env:LOCALAPPDATA\Programs\Python\Python31*","C:\Python31*","C:\Program Files\Python31*" -Directory -EA 0 | Sort-Object Name | Select-Object -Last 1).FullName; if ($py) { $add += $py, "$py\Scripts" }; $add += "C:\Program Files\nodejs","C:\Program Files\Git\cmd","C:\Program Files\GitHub CLI","$env:APPDATA\npm","$env:LOCALAPPDATA\Microsoft\WinGet\Links","$env:USERPROFILE\.local\bin"; $u=[Environment]::GetEnvironmentVariable("Path","User"); foreach ($f in $add) { if ((Test-Path $f) -and (($u -split ';') -notcontains $f)) { $u="$u;$f"; Write-Host "Added: $f" } }; [Environment]::SetEnvironmentVariable("Path",$u,"User"); Write-Host "Done - close this window and open a fresh one."
 ```
 
 _macOS — Terminal:_
 ```bash
-for d in /opt/homebrew/bin /usr/local/bin /Library/Frameworks/Python.framework/Versions/3.14/bin; do
+for d in /usr/local/bin /opt/homebrew/bin /Library/Frameworks/Python.framework/Versions/3.14/bin /opt/homebrew/opt/python@3.14/libexec/bin "$HOME/.npm-global/bin" "$HOME/.local/bin"; do
   [ -d "$d" ] && ! grep -qF "export PATH=\"$d:\$PATH\"" ~/.zshrc && echo "export PATH=\"$d:\$PATH\"" >> ~/.zshrc && echo "Added: $d"
 done
 source ~/.zshrc
@@ -159,20 +164,25 @@ winget install -e --id Python.Python.3.14
 winget install -e --id OpenJS.NodeJS.LTS
 winget install -e --id Git.Git
 winget install -e --id GitHub.cli
+winget install -e --id Anthropic.ClaudeCode
 ```
 ```powershell
-npm i -g supabase vercel @anthropic-ai/claude-code
+npm i -g supabase vercel
 ```
-> If the Python line can't find `3.14`, change it to `3.13` and run that one line again.
+> If a winget line says no package was found, run `winget source update`, then run that line again.
 
-_macOS — Terminal. Block 1 installs Homebrew + the base tools, block 2 finishes:_
+_macOS — Terminal. Block 1 installs Homebrew + the base tools, block 2 finishes. Then close Terminal and open a new one:_
 ```bash
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+[ -x /opt/homebrew/bin/brew ] && echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile && eval "$(/opt/homebrew/bin/brew shellenv)"
 brew install python@3.14 node git gh supabase/tap/supabase
 ```
 ```bash
-npm i -g vercel @anthropic-ai/claude-code
+npm i -g vercel
+curl -fsSL https://claude.ai/install.sh | bash
+echo 'export PATH="$HOME/.local/bin:/opt/homebrew/opt/python@3.14/libexec/bin:$PATH"' >> ~/.zshrc
 ```
+> The last line makes `claude` and `python3` (3.14, not Apple's old 3.9) work in new windows.
 
 If antivirus also blocks the `npm i -g` line, tell it to **Allow** once (or pause protection for 10 min), then re-run that line.
 
@@ -180,24 +190,26 @@ If antivirus also blocks the `npm i -g` line, tell it to **Allow** once (or paus
 
 | Tool | Where |
 |---|---|
-| Python 3.14 | <https://www.python.org/downloads/> (Windows: tick "Add to PATH") |
+| Python 3.14 or newer | <https://www.python.org/downloads/> (Windows: tick "Add to PATH") |
 | Node.js LTS | <https://nodejs.org/en/download> |
 | Git | <https://git-scm.com/downloads> |
 | GitHub CLI | <https://cli.github.com/> |
 | Supabase | macOS `brew install supabase/tap/supabase` · Windows `npm i -g supabase` |
 | Vercel | `npm i -g vercel` |
-| Claude Code | `npm i -g @anthropic-ai/claude-code` |
+| Claude Code | macOS `curl -fsSL https://claude.ai/install.sh \| bash` · Windows `winget install Anthropic.ClaudeCode` |
 
 Sign in with the commands under **Done = all green** above.
 
 </details>
 
 <details>
-<summary><b>Before each cohort</b> — clean-VM test</summary>
+<summary><b>Before each cohort</b> — automatic cloud test + clean-VM test</summary>
 
 <br>
 
-Run [docs/MANUAL-VM-TEST.md](docs/MANUAL-VM-TEST.md) on a clean VM (~30 min — has caught real bugs). Found a bug? [Open an issue](https://github.com/bigai-dev/vc-installation-script/issues) with the log, a screenshot of the final table, and the OS version.
+**Automatic (no Windows device needed):** every change to the scripts is run for real on GitHub's free cloud computers — Windows Server 2025, Windows 11 (ARM), and Macs on macOS 15 and 26. It also runs every Monday, to catch outside changes (like a new Python or Node release) early. The badge at the top of this page shows the latest result; a green tick means every tool installed and worked in a fresh window. To run it on demand: **Actions** tab → **Test setup scripts** → **Run workflow**.
+
+**By hand:** run [docs/MANUAL-VM-TEST.md](docs/MANUAL-VM-TEST.md) on a clean VM (~30 min — has caught real bugs). Found a bug? [Open an issue](https://github.com/bigai-dev/vc-installation-script/issues) with the log, a screenshot of the final table, and the OS version.
 
 </details>
 
