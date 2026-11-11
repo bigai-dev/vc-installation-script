@@ -99,10 +99,18 @@ jobs:
         shell: powershell
         run: |
           # Same as a student closing the fixer and opening a fresh PowerShell.
+          # GitHub runs these steps with ErrorActionPreference=Stop, which turns
+          # anything a tool prints on stderr (Vercel prints "Vercel CLI 65.x"
+          # there) into a crash. A normal PowerShell window uses Continue.
+          $ErrorActionPreference = 'Continue'
           $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')
           $bad = 0
           foreach ($t in 'python', 'node', 'npm.cmd', 'git', 'gh', 'supabase', 'vercel', 'claude') {
-            $out = try { "$(& $t --version 2>&1 | Select-Object -First 1)" } catch { 'NOT FOUND' }
+            if (-not (Get-Command $t -ErrorAction SilentlyContinue)) {
+              $out = 'NOT FOUND'
+            } else {
+              $out = try { "$(& $t --version 2>&1 | Select-Object -First 1)" } catch { "ERROR: $($_.Exception.Message)" }
+            }
             Write-Host ('{0,-10} {1}' -f $t, $out)
             if ($out -notmatch '\d+\.\d+') { Write-Host "::error::$t does not work in a new window"; $bad++ }
           }
