@@ -66,18 +66,18 @@ Claude is our main AI coding helper, made by Anthropic. You need two things: a p
 **Tips**
 - **Pro is $20/month USD**. Max costs more — pick it only if you want a lot more usage. Both take credit and debit cards, including Malaysian ones.
 - **Cancel anytime** from Settings → Billing. Takes 10 seconds.
-- Unlocks **Opus 4.7**, the most powerful Claude model.
+- Unlocks Claude's most capable models (like **Opus**).
 - About **5× more usage** than free, plus Claude Code for AI coding.
 
 ---
 
 ## Step 3 — Install Python ★ Must have
 
-Python runs backend scripts and tools. The newest version is **Python 3.14**.
+Python runs backend scripts and tools. The workshop uses **Python 3.14** (a newer one, like 3.15, is fine too).
 
 ### Windows
 1. Go to the Python downloads page: <https://www.python.org/downloads/>
-2. In the **Windows** section, **ignore** the "Download Python install manager" button. Right below it, click the link **"Or get the standalone installer for Python 3.14.x"**. This downloads the `.exe` file right away.
+2. In the **Windows** section, **ignore** the "Download Python install manager" button. Right below it, click the link **"Or get the standalone installer for Python 3.x.x"** (the exact numbers change over time). This downloads the `.exe` file right away.
 3. Open the `.exe` file from your Downloads folder.
 4. **Important: tick the "Add python.exe to PATH" checkbox** at the bottom of the installer window. If you skip this, Python won't work in PowerShell.
 5. The big main button says one of two things:
@@ -89,12 +89,12 @@ Python runs backend scripts and tools. The newest version is **Python 3.14**.
 
 ### Mac
 1. Download Python for Mac: <https://www.python.org/downloads/macos/>
-2. Click the **"Download Python 3.14.x"** button at the top of the page.
+2. Click the **"Download Python 3.x.x"** button at the top of the page (3.14 or newer).
 3. Open the `.pkg` file from your Downloads folder.
 4. Click **Continue → Continue → Agree → Install**.
 5. Type your Mac password when it asks. Wait for the install to finish.
 6. Click **Close** when you see "The installation was successful".
-7. **One more step.** Open **Finder**, go to **Applications → Python 3.14**, and double-click **Install Certificates.command**. A Terminal window opens for a moment and says "Process completed". Close it.
+7. **One more step.** Open **Finder**, go to **Applications → Python 3.x** (the version you just installed), and double-click **Install Certificates.command**. A Terminal window opens for a moment and says "Process completed". Close it.
 
 ### Verify
 Open your terminal:
@@ -110,7 +110,7 @@ Then run:
 - **Windows:** `python --version`
 - **Mac:** `python3 --version`
 
-**Expected output:** `Python 3.14.x`
+**Expected output:** `Python 3.14.x` or newer (like `Python 3.15.x`)
 
 ### Troubleshooting
 
@@ -128,11 +128,11 @@ Then run:
 
 ## Step 4 — Install Node.js ★ Must have
 
-Node.js runs JavaScript tools and frameworks. We need the **LTS (Long Term Support)** version, which is **Node.js 24**.
+Node.js runs JavaScript tools and frameworks. We need the **LTS (Long Term Support)** version, which is **Node.js 26**.
 
 ### Windows
 1. Go to <https://nodejs.org> and click **"Get Node.js®"**.
-2. The download page opens. **Skip the top section** (commands like `nvm install 24` — that's for advanced users).
+2. The download page opens. **Skip the top section** (commands like `nvm install …` — that's for advanced users).
 3. **Scroll down** until you see: *"Or get a prebuilt Node.js® for Windows running a x64 architecture."*
 4. Click the **"Windows Installer (.msi)"** button.
 5. **Not sure if your PC is x64 or ARM64?** The default (x64) works for almost everyone. To check: press **Windows Key + Pause/Break** (or open **Settings → System → About**). Look at **"System type"**.
@@ -160,8 +160,8 @@ Open a **NEW** terminal window and run **both**:
 
 | OS | Command 1 | Expected | Command 2 | Expected |
 |----|-----------|----------|-----------|----------|
-| Windows | `node -v` | `v24.x.x` | `npm -v` | `11.x.x` |
-| Mac | `node -v` | `v24.x.x` | `npm -v` | `11.x.x` |
+| Windows | `node -v` | `v26.x.x` | `npm -v` | `11.x.x` |
+| Mac | `node -v` | `v26.x.x` | `npm -v` | `11.x.x` |
 
 ### Troubleshooting
 
@@ -188,7 +188,7 @@ Open a **NEW** terminal window and run **both**:
 
 ## Step 5 — Install Git
 
-Git tracks changes in your code and sends it to GitHub. The newest version is **Git 2.53**.
+Git tracks changes in your code and sends it to GitHub. Any recent version is fine (the newest is **Git 2.56**).
 
 ### Windows
 1. Download Git for Windows: <https://git-scm.com/downloads>
@@ -206,7 +206,7 @@ Open a new terminal window and run:
 ```bash
 git --version
 ```
-**Expected output:** `git version 2.53.x`
+**Expected output:** `git version 2.` followed by more numbers (any recent version is fine)
 
 ### One more thing — tell Git who you are
 Git needs your name and email. When you save changes later, they'll be tagged with your name. You only do this once, ever.
@@ -314,7 +314,7 @@ We'll let **Claude Code** (the Code tab in your Claude Desktop App) install the 
 1. **Open the Claude Desktop App** you installed in Step 2.
 2. **Click the "Code" tab** at the top center of the app. If clicking it asks you to upgrade, you need an active Pro or Max plan (Step 2).
 3. **Pick "Local" as the environment**, then click **"Select folder"**. Pick any folder you don't mind Claude working in — your `Documents` folder is fine. Click **Open**.
-4. **Check the model dropdown** next to the send button. **Opus 4.7** works best; Sonnet 4.6 also works.
+4. **Check the model dropdown** next to the send button. **Opus** works best; **Sonnet** also works.
 5. **Paste this prompt** into the chat box and press **Enter**:
 
    ```
@@ -364,8 +364,8 @@ You're almost there! Just a few last things to make sure you're ready for the wo
 - [ ] Step 1 — Gmail account ready
 - [ ] Step 2 — ★ Claude Pro/Max + desktop app signed in
 - [ ] Step 3 — ★ Python 3.14 installed and verified
-- [ ] Step 4 — ★ Node.js 24 (with npm) installed and verified
-- [ ] Step 5 — Git 2.53 installed; name + email configured
+- [ ] Step 4 — ★ Node.js 26 (with npm) installed and verified
+- [ ] Step 5 — Git installed; name + email configured
 - [ ] Step 6 — GitHub account created (professional username)
 - [ ] Step 7 — Supabase signed in via GitHub
 - [ ] Step 8 — Vercel signed in via GitHub (Hobby plan)

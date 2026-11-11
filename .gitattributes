@@ -1,0 +1,9 @@
+# Windows needs Windows-style line endings (CRLF) in .bat/.cmd files, or cmd.exe
+# can fail to find the ":labels" that `goto` jumps to. GitHub's "Download ZIP"
+# applies this, so students always get the right format.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Mac/Linux shell scripts must keep Unix line endings (LF) or bash breaks.
+*.sh      text eol=lf
+*.command text eol=lf

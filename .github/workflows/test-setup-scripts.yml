@@ -1,0 +1,193 @@
+name: Test setup scripts
+
+# Runs the REAL setup scripts on GitHub's free cloud computers - real Windows
+# and real Macs - so the scripts can be tested without owning a Windows device.
+# Runs when a pull request changes the scripts, when changes land on main,
+# when someone clicks "Run workflow" (Actions tab), and every Monday so outside
+# changes (a new Python or Node release, a renamed package) are caught early.
+on:
+  pull_request:
+    paths:
+      - 'script/**'
+      - '.github/workflows/test-setup-scripts.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'script/**'
+      - '.github/workflows/test-setup-scripts.yml'
+  workflow_dispatch:
+  schedule:
+    - cron: '0 1 * * 1'   # Mondays 01:00 UTC = 09:00 Malaysia
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: Windows (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        # windows-2025:   Windows on an Intel/AMD chip (like most student laptops)
+        # windows-11-arm: Windows 11 on an ARM chip (like Snapdragon laptops)
+        os: [windows-2025, windows-11-arm]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Script has no syntax errors (Windows PowerShell 5.1)
+        shell: powershell
+        run: |
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile("$PWD\script\fix-vibecode.ps1", [ref]$null, [ref]$errors)
+          if ($errors) {
+            $errors | ForEach-Object { Write-Host "::error file=script/fix-vibecode.ps1,line=$($_.Extent.StartLineNumber)::$($_.Message)" }
+            exit 1
+          }
+          Write-Host "No syntax errors."
+
+      - name: Make this cloud machine look like a student laptop
+        shell: powershell
+        run: |
+          # The cloud machine has an extra Python on its system PATH that a
+          # student laptop wouldn't have. Hide it so the fixer has to install
+          # Python 3.14 itself, like it would for a student.
+          foreach ($scope in 'Machine', 'User') {
+            $old = [Environment]::GetEnvironmentVariable('Path', $scope)
+            if (-not $old) { continue }
+            $new = ($old -split ';' | Where-Object { $_ -and $_ -notmatch '\\hostedtoolcache\\windows\\Python\\' }) -join ';'
+            [Environment]::SetEnvironmentVariable('Path', $new, $scope)
+          }
+          Write-Host "Pre-installed Python hidden from PATH."
+
+      - name: Check-only run (-DiagnoseOnly)
+        shell: powershell
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File script\fix-vibecode.ps1 -DiagnoseOnly
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Full run through run-fixer.bat (the file students double-click)
+        shell: cmd
+        timeout-minutes: 45
+        # "< nul" answers the two "press any key" pauses automatically.
+        run: call script\run-fixer.bat < nul
+
+      - name: Every tool is OK in the final table
+        shell: powershell
+        run: |
+          $log = Get-ChildItem "$env:TEMP\fix-vibecode-2*.log" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime | Select-Object -Last 1
+          if (-not $log) { Write-Host "::error::No session log found - the fixer did not run"; exit 1 }
+          $lines = @(Get-Content $log.FullName)
+          $hit = $lines | Select-String -Pattern 'Tool\s+Status\s+Version' | Select-Object -Last 1
+          if ($hit) { $lines[($hit.LineNumber - 1)..($lines.Count - 1)] | ForEach-Object { Write-Host $_ } }
+          $failed = @($lines | Select-String -Pattern '^\s{2}\S+\s+Failed\s')
+          if ($failed.Count -gt 0) {
+            $failed | ForEach-Object { Write-Host "::error::$($_.Line.Trim())" }
+            exit 1
+          }
+          if (-not ($lines | Select-String -SimpleMatch 'All tools are working')) {
+            Write-Host "::error::The fixer did not finish with 'All tools are working'"
+            exit 1
+          }
+
+      - name: Tools work in a brand-new window
+        shell: powershell
+        run: |
+          # Same as a student closing the fixer and opening a fresh PowerShell.
+          # GitHub runs these steps with ErrorActionPreference=Stop, which turns
+          # anything a tool prints on stderr (Vercel prints "Vercel CLI 65.x"
+          # there) into a crash. A normal PowerShell window uses Continue.
+          $ErrorActionPreference = 'Continue'
+          $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')
+          $bad = 0
+          foreach ($t in 'python', 'node', 'npm.cmd', 'git', 'gh', 'supabase', 'vercel', 'claude') {
+            if (-not (Get-Command $t -ErrorAction SilentlyContinue)) {
+              $out = 'NOT FOUND'
+            } else {
+              $out = try { "$(& $t --version 2>&1 | Select-Object -First 1)" } catch { "ERROR: $($_.Exception.Message)" }
+            }
+            Write-Host ('{0,-10} {1}' -f $t, $out)
+            if ($out -notmatch '\d+\.\d+') { Write-Host "::error::$t does not work in a new window"; $bad++ }
+          }
+          $py = "$(& python --version 2>&1)" -replace '^Python\s+', ''
+          if ($py -notmatch '^\d+\.\d+' -or [version]($py -replace '[^\d.].*$', '') -lt [version]'3.14') {
+            Write-Host "::error::python in a new window is '$py', expected 3.14 or newer"
+            $bad++
+          }
+          if ($bad) { exit 1 }
+
+      - name: Collect logs
+        if: always()
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force logs | Out-Null
+          Copy-Item "$env:TEMP\fix-vibecode*.log" logs\ -ErrorAction SilentlyContinue
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: logs-${{ matrix.os }}
+          path: logs/
+          if-no-files-found: ignore
+
+  mac:
+    name: Mac (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        # Apple-chip Macs on the two newest macOS versions.
+        os: [macos-15, macos-26]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Scripts have no syntax errors (the Mac's built-in bash 3.2)
+        run: |
+          /bin/bash -n script/fix-vibecode-mac.sh
+          /bin/bash -n script/run-fixer.command
+          echo "No syntax errors."
+
+      - name: Check-only run (--diagnose-only)
+        run: /bin/bash script/fix-vibecode-mac.sh --diagnose-only
+
+      - name: Full run
+        timeout-minutes: 45
+        run: /bin/bash script/fix-vibecode-mac.sh
+
+      - name: Every tool is OK in the final table
+        run: |
+          log=$(ls -t /tmp/fix-vibecode-*.log 2>/dev/null | head -n 1)
+          [ -n "$log" ] || { echo "::error::No session log found - the fixer did not run"; exit 1; }
+          sed -n '/Tool        Status/,$p' "$log"
+          if grep -E '^  [a-z0-9]+ +Failed ' "$log"; then
+            echo "::error::Some tools failed - see the table above"
+            exit 1
+          fi
+          grep -q 'All tools are working' "$log" || { echo "::error::The fixer did not finish with 'All tools are working'"; exit 1; }
+
+      - name: Python and Claude Code work in a brand-new Terminal window
+        run: |
+          # A clean login shell, like a student opening a new Terminal window.
+          sh_bin="${SHELL:-/bin/zsh}"
+          env -i HOME="$HOME" USER="$USER" LOGNAME="$USER" SHELL="$sh_bin" TERM=xterm-256color \
+            "$sh_bin" -l -i -c 'for t in python3 node npm git gh supabase vercel claude; do printf "%-9s %s\n" "$t" "$($t --version 2>&1 | head -n 1)"; done' 2>/dev/null | tee fresh.txt
+          py=$(awk '$1=="python3" {print $3}' fresh.txt)
+          printf '%s\n%s\n' "3.14.0" "$py" | sort -t. -k1,1n -k2,2n -k3,3n -C || { echo "::error::python3 in a new window is '$py', expected 3.14 or newer"; exit 1; }
+          grep -E '^claude +[0-9]+\.[0-9]+' fresh.txt >/dev/null || { echo "::error::claude does not work in a new window"; exit 1; }
+
+      - name: Collect logs
+        if: always()
+        run: mkdir -p logs && cp /tmp/fix-vibecode-*.log logs/ 2>/dev/null || true
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: logs-${{ matrix.os }}
+          path: logs/
+          if-no-files-found: ignore

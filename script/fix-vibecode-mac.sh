@@ -14,15 +14,18 @@
 #    Vercel CLI, and Claude Code.
 #
 #  Per tool the script:
-#    - Looks for an existing install
-#    - Installs via Homebrew (npm for vercel / claude code) if missing
+#    - Looks for an existing install (and upgrades Node if it's too old)
+#    - Installs via Homebrew if missing (npm for Vercel; Anthropic's own
+#      installer for Claude Code, which is Anthropic's recommended method)
 #    - Ensures the right folder is on PATH in the user's shell rc
-#    - Verifies the tool runs in this same shell
+#    - Verifies the tool runs in this same shell and reports a real version
 #
 #  It also:
 #    - Bootstraps Xcode Command Line Tools if missing (needed for git, brew)
 #    - Bootstraps Homebrew if missing
-#    - Backs up ~/.zshrc and ~/.bash_profile before any change
+#    - Makes plain `python3` run the workshop Python (not Apple's old 3.9)
+#    - Moves npm's install folder to ~/.npm-global if the system one is locked
+#    - Backs up ~/.zshrc, ~/.bash_profile and ~/.npmrc before any change
 #    - Writes a full session log to /tmp/
 #    - Prints a final OK/FAIL table per tool, plus the login commands
 #
@@ -156,26 +159,33 @@ info "Detected shell: $USER_SHELL_NAME  (rc file: $RC_FILE)"
 
 # ---------- PATH helpers ----------
 ensure_path_line_in_rc() {
+    # ensure_path_line_in_rc <dir> [first]
     # Adds a single `export PATH="<dir>:$PATH"` line to the rc file if missing.
     # Also updates the CURRENT shell's PATH so later steps in this script see it.
-    local dir="$1"
+    # With "first", <dir> is moved to the front even if it's already further
+    # back on PATH - for when an older copy of a tool (e.g. Apple's python3)
+    # would otherwise be found first.
+    local dir="$1" mode="${2:-}"
     if [ ! -d "$dir" ]; then
         warn "Skip add to PATH (folder missing): $dir"
         return 1
     fi
 
     # If brew shellenv (or anything else) already puts this dir on the user's PATH,
-    # don't add a duplicate line — would just clutter ~/.zshrc.
-    case ":$PATH:" in
-        *":$dir:"*)
-            info "Already on PATH: $dir"
-            return 1
-            ;;
-    esac
+    # don't add a duplicate line - would just clutter ~/.zshrc.
+    if [ "$mode" != "first" ]; then
+        case ":$PATH:" in
+            *":$dir:"*)
+                info "Already on PATH: $dir"
+                return 1
+                ;;
+        esac
+    fi
 
     PATH="$dir:$PATH"; export PATH
 
-    if [ ! -f "$RC_FILE" ]; then touch "$RC_FILE"; fi
+    # (No `touch` here: diagnose mode must not create files. The >> below
+    # creates the rc file if it doesn't exist yet.)
     local needle="export PATH=\"$dir:\$PATH\""
     if grep -qsF "$needle" "$RC_FILE"; then
         info "Already in $RC_FILE: $dir"
@@ -202,6 +212,84 @@ ensure_path_line_in_rc() {
 extract_version() {
     # Reads stdin, returns first thing that looks like a semver or vN.N.N
     grep -Eo 'v?[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n 1
+}
+
+# Run "<tool> --version" and print just the version number, or NOTHING when the
+# tool runs but prints no version (an error message instead). Callers treat an
+# empty result as "broken" and mark the tool Failed rather than showing green.
+tool_version() {
+    "$@" --version 2>&1 | extract_version
+}
+
+# "v26.13.0" -> 26 ; empty or garbage -> 0
+major_of() {
+    local m
+    m=$(echo "${1:-}" | sed -E 's/^v?([0-9]+).*/\1/')
+    case "$m" in ''|*[!0-9]*) m=0 ;; esac
+    echo "$m"
+}
+
+# True if <dir> is writable, or doesn't exist yet but could be created.
+can_write_dir() {
+    [ -w "$1" ] || { [ ! -e "$1" ] && [ -w "$(dirname "$1")" ]; }
+}
+
+# The Node installer from nodejs.org (which the prep guide points Mac students
+# to) puts npm's global folder in /usr/local, owned by the system, so
+# `npm install -g` fails with "permission denied" (EACCES). npm's own
+# recommended fix: point npm at a folder in the user's home. Only acts when the
+# current folder really isn't writable (Homebrew and nvm Node are fine).
+ensure_npm_global_writable() {
+    local prefix
+    prefix=$(npm config get prefix 2>/dev/null)
+    [ -z "$prefix" ] && return 0
+    if can_write_dir "$prefix/lib/node_modules" && can_write_dir "$prefix/bin"; then
+        return 0
+    fi
+    warn "npm's install folder ($prefix) belongs to the system - switching npm to ~/.npm-global."
+    if [ "$DIAGNOSE_ONLY" -eq 1 ]; then
+        warn "WOULD run: npm config set prefix ~/.npm-global  (and add ~/.npm-global/bin to PATH)"
+        return 0
+    fi
+    mkdir -p "$HOME/.npm-global/bin" "$HOME/.npm-global/lib"
+    if npm config set prefix "$HOME/.npm-global"; then
+        ok "npm now installs tools into ~/.npm-global (no password needed)"
+        ensure_path_line_in_rc "$HOME/.npm-global/bin" first || true
+        hash -r
+    else
+        fail "Could not change npm's install folder - npm installs may fail."
+    fi
+}
+
+# Claude Code comes from Anthropic's own installer - their recommended method:
+# no Node/npm needed, it keeps itself up to date, and it isn't hit by npm 12+
+# skipping install steps. It puts `claude` in ~/.local/bin but does NOT add
+# that folder to PATH itself, so we do.
+install_claude_native() {
+    local tmpdir rc=0
+    tmpdir=$(mktemp -d 2>/dev/null || mktemp -d -t claude-install)
+    if ! curl -fsSL https://claude.ai/install.sh -o "$tmpdir/install.sh"; then
+        rm -rf "$tmpdir"
+        return 1
+    fi
+    # </dev/null: the installer must never sit waiting for keyboard input.
+    bash "$tmpdir/install.sh" </dev/null || rc=$?
+    rm -rf "$tmpdir"
+    [ "$rc" -eq 0 ] || return 1
+    mkdir -p "$HOME/.local/bin"
+    ensure_path_line_in_rc "$HOME/.local/bin" || true
+    hash -r
+    return 0
+}
+
+# True if <path> is the npm copy of Claude Code (the old install method).
+is_npm_claude() {
+    local target
+    target=$(readlink "$1" 2>/dev/null || true)
+    case "$1 $target" in
+        *node_modules/@anthropic-ai/claude-code*) return 0 ;;
+    esac
+    return 1
 }
 
 # ---------- Preflight: Xcode Command Line Tools (needed for brew, git) ----------
@@ -277,14 +365,19 @@ fi
 # ---------- Back up shell rc files ----------
 step "Backing up your shell config"
 BACKUP_DIR="$HOME/dotfile-backups"
-mkdir -p "$BACKUP_DIR"
-for f in "$HOME/.zshrc" "$HOME/.bash_profile" "$HOME/.profile" "$HOME/.bashrc"; do
-    if [ -f "$f" ]; then
-        cp "$f" "$BACKUP_DIR/$(basename "$f").$STAMP.bak"
-        info "Backed up: $f -> $BACKUP_DIR/$(basename "$f").$STAMP.bak"
-    fi
-done
-ok "Backups in $BACKUP_DIR"
+if [ "$DIAGNOSE_ONLY" -eq 1 ]; then
+    info "Diagnose only - nothing will be changed, so no backup needed."
+else
+    mkdir -p "$BACKUP_DIR"
+    # ~/.npmrc too: the script may point npm at ~/.npm-global (see below).
+    for f in "$HOME/.zshrc" "$HOME/.bash_profile" "$HOME/.profile" "$HOME/.bashrc" "$HOME/.npmrc"; do
+        if [ -f "$f" ]; then
+            cp "$f" "$BACKUP_DIR/$(basename "$f").$STAMP.bak"
+            info "Backed up: $f -> $BACKUP_DIR/$(basename "$f").$STAMP.bak"
+        fi
+    done
+    ok "Backups in $BACKUP_DIR"
+fi
 
 # ---------- Wrapper around brew install ----------
 brew_install() {
@@ -304,14 +397,15 @@ find_python_candidates() {
     # Print one path per line. Use unique to dedupe.
     {
         # brew formulas
-        for p in /opt/homebrew/bin/python3 /opt/homebrew/bin/python3.14 /opt/homebrew/bin/python3.13 \
-                 /usr/local/bin/python3 /usr/local/bin/python3.14 /usr/local/bin/python3.13; do
+        for p in /opt/homebrew/bin/python3 /opt/homebrew/bin/python3.15 /opt/homebrew/bin/python3.14 /opt/homebrew/bin/python3.13 \
+                 /usr/local/bin/python3 /usr/local/bin/python3.15 /usr/local/bin/python3.14 /usr/local/bin/python3.13; do
             [ -x "$p" ] && echo "$p"
         done
         # Apple's preinstalled (we'll filter out by version anyway)
         [ -x /usr/bin/python3 ] && echo /usr/bin/python3
         # python.org installer (Frameworks)
-        for d in /Library/Frameworks/Python.framework/Versions/3.14/bin \
+        for d in /Library/Frameworks/Python.framework/Versions/3.15/bin \
+                 /Library/Frameworks/Python.framework/Versions/3.14/bin \
                  /Library/Frameworks/Python.framework/Versions/3.13/bin; do
             [ -x "$d/python3" ] && echo "$d/python3"
         done
@@ -328,12 +422,73 @@ ver_ge() {
     [ "$(printf '%s\n%s\n' "$1" "$2" | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1)" = "$1" ]
 }
 
+python_cmd_dir() {
+    # python_cmd_dir <python exe> <version>
+    # Folder to put first on PATH so plain `python3` runs this Python.
+    # Since Oct 2026 Homebrew's default Python is 3.15, so a fresh python@3.14
+    # only creates `python3.14` in /opt/homebrew/bin; its plain `python3` (and
+    # `python`, `pip`) live in <brew prefix>/opt/python@3.14/libexec/bin.
+    # Older python@3.14 installs (from when it was the default) still have
+    # plain python3 next to the exe, so the exe's own folder is right for them.
+    local exe="$1" ver="$2" mm prefix libexec_bin
+    mm=$(echo "$ver" | cut -d. -f1-2)
+    if [ -n "$BREW_BIN" ]; then
+        prefix=$("$BREW_BIN" --prefix 2>/dev/null)
+        libexec_bin="$prefix/opt/python@$mm/libexec/bin"
+        case "$exe" in
+            "$prefix"/*)
+                if [ -x "$libexec_bin/python3" ]; then
+                    echo "$libexec_bin"
+                    return
+                fi
+                ;;
+        esac
+    fi
+    dirname "$exe"
+}
+
+use_python() {
+    # use_python <python exe> <version> <status>
+    # Put this Python first on PATH (now and in new windows), then prove that
+    # typing plain `python3` really runs it - not Apple's old built-in 3.9.
+    local exe="$1" ver="$2" status="$3" dir now
+    dir=$(python_cmd_dir "$exe" "$ver")
+    if [ "$DIAGNOSE_ONLY" -eq 1 ]; then
+        # Report what typing python3 does RIGHT NOW (nothing gets changed).
+        now=$(tool_version python3)
+        ensure_path_line_in_rc "$dir" || true
+        if [ -n "$now" ] && ver_ge "$now" "3.14.0"; then
+            set_result python "$status" "$ver" "$exe"
+        else
+            warn "Typing python3 currently runs ${now:-nothing}, not Python $ver."
+            set_result python Skipped "$ver" "$exe" "python3 runs ${now:-nothing} - would fix PATH"
+        fi
+        return
+    fi
+    ensure_path_line_in_rc "$dir" || true
+    hash -r
+    now=$(tool_version python3)
+    if [ -z "$now" ] || ! ver_ge "$now" "3.14.0"; then
+        # An older python3 is still found first - move our folder to the front.
+        ensure_path_line_in_rc "$dir" first || true
+        hash -r
+        now=$(tool_version python3)
+    fi
+    if [ -n "$now" ] && ver_ge "$now" "3.14.0"; then
+        ok "Typing python3 runs Python $now"
+        set_result python "$status" "$ver" "$exe"
+    else
+        fail "Typing python3 runs ${now:-nothing} instead of Python $ver."
+        set_result python Failed "$ver" "$exe" "python3 runs ${now:-nothing}, not $ver"
+    fi
+}
+
 install_python() {
     local best_path="" best_ver=""
     while IFS= read -r p; do
         [ -z "$p" ] && continue
         local v
-        v=$("$p" --version 2>&1 | awk '{print $2}')
+        v=$(tool_version "$p")
         [ -z "$v" ] && continue
         if [ -z "$best_ver" ] || ver_ge "$v" "$best_ver"; then
             best_ver="$v"; best_path="$p"
@@ -342,11 +497,7 @@ install_python() {
 
     if [ -n "$best_path" ] && ver_ge "$best_ver" "3.14.0"; then
         ok "Python $best_ver: $best_path"
-        set_result python AlreadyInstalled "$best_ver" "$best_path"
-        # Make sure its dir is first on PATH so workshops find it
-        local pydir
-        pydir=$(dirname "$best_path")
-        ensure_path_line_in_rc "$pydir" || true
+        use_python "$best_path" "$best_ver" AlreadyInstalled
         return
     fi
 
@@ -363,23 +514,20 @@ install_python() {
 
     info "Installing python@3.14 via brew..."
     if "$BREW_BIN" install python@3.14; then
+        hash -r
         # brew links it as /opt/homebrew/bin/python3.14 (or /usr/local on Intel)
-        local newp=""
+        local newp="" v=""
         for p in /opt/homebrew/bin/python3.14 /usr/local/bin/python3.14 /opt/homebrew/bin/python3 /usr/local/bin/python3; do
             if [ -x "$p" ]; then
-                local v
-                v=$("$p" --version 2>&1 | awk '{print $2}')
-                if ver_ge "$v" "3.14.0"; then
+                v=$(tool_version "$p")
+                if [ -n "$v" ] && ver_ge "$v" "3.14.0"; then
                     newp="$p"; break
                 fi
             fi
         done
         if [ -n "$newp" ]; then
-            local v
-            v=$("$newp" --version 2>&1 | awk '{print $2}')
             ok "Python $v installed: $newp"
-            set_result python Installed "$v" "$newp"
-            ensure_path_line_in_rc "$(dirname "$newp")" || true
+            use_python "$newp" "$v" Installed
         else
             fail "Python install succeeded but python3.14 not found."
             set_result python Failed "" "" "Post-install search failed"
@@ -395,26 +543,47 @@ install_python
 # ---------- Node.js ----------
 step "Checking Node.js"
 
+# Oldest Node the workshop tools support: Vercel CLI needs 20+, Claude Code asks
+# for 22+. 23 and 25 were short-lived releases that no longer get security
+# fixes. Raise NODE_MIN_MAJOR to 24 after April 2027 (Node 22's end of life).
+NODE_MIN_MAJOR=22
+node_too_old() {
+    # node_too_old <major version number>
+    [ "$1" -lt "$NODE_MIN_MAJOR" ] || [ "$1" -eq 23 ] || [ "$1" -eq 25 ]
+}
+
 install_node() {
     if command -v node >/dev/null 2>&1; then
         local nv npmv node_src
-        nv=$(node --version 2>&1)
-        npmv=$(npm --version 2>&1)
+        nv=$(tool_version node)
+        npmv=$(tool_version npm)
         node_src=$(command -v node)
-        ok "node $nv,  npm $npmv  ($node_src)"
+        ok "node ${nv:-(no version)},  npm ${npmv:-(no version)}  ($node_src)"
 
-        local major
-        major=$(echo "$nv" | sed -E 's/^v([0-9]+).*/\1/')
-        if [ "$major" -lt 18 ]; then
-            warn "Node $nv is below v18. Upgrading via brew..."
+        if node_too_old "$(major_of "$nv")"; then
+            warn "Node ${nv:-(broken)} is too old or out of support (need v$NODE_MIN_MAJOR+, not 23/25)."
             if [ "$DIAGNOSE_ONLY" -eq 0 ]; then
-                "$BREW_BIN" install node || true
-                local nv2
-                nv2=$(node --version 2>&1)
-                ok "node upgraded: $nv2"
-                set_result node Installed "$nv2" "$(command -v node)"
+                info "Upgrading Node via brew..."
+                # `brew install` won't upgrade a Node that brew already manages.
+                if "$BREW_BIN" list --versions node >/dev/null 2>&1; then
+                    "$BREW_BIN" upgrade node || true
+                else
+                    "$BREW_BIN" install node || true
+                fi
+                hash -r
+                local nv2 node2_src
+                nv2=$(tool_version node)
+                node2_src=$(command -v node 2>/dev/null || true)
+                if [ -n "$nv2" ] && ! node_too_old "$(major_of "$nv2")"; then
+                    ok "node upgraded: $nv2"
+                    set_result node Installed "$nv2" "$node2_src"
+                else
+                    fail "Node is still ${nv2:-not working} after the upgrade ($node2_src)."
+                    info "Another Node install (e.g. from nodejs.org or nvm) is probably found first."
+                    set_result node Failed "$nv2" "$node2_src" "Still ${nv2:-not working} - remove the older Node, then re-run"
+                fi
             else
-                set_result node Skipped "$nv" "$node_src" "Would upgrade"
+                set_result node Skipped "$nv" "$node_src" "Would upgrade to the current LTS"
             fi
         else
             set_result node AlreadyInstalled "$nv" "$node_src"
@@ -430,10 +599,16 @@ install_node() {
 
     info "Installing Node.js via brew..."
     if "$BREW_BIN" install node; then
+        hash -r
         local nv
-        nv=$(node --version 2>&1)
-        ok "Node $nv installed: $(command -v node)"
-        set_result node Installed "$nv" "$(command -v node)"
+        nv=$(tool_version node)
+        if [ -n "$nv" ]; then
+            ok "Node $nv installed: $(command -v node)"
+            set_result node Installed "$nv" "$(command -v node)"
+        else
+            fail "brew installed node, but it doesn't run."
+            set_result node Failed "" "$(command -v node 2>/dev/null || true)" "Installed, but node --version fails"
+        fi
     else
         fail "brew install node failed."
         set_result node Failed "" "" "brew install failed"
@@ -447,12 +622,20 @@ step "Checking Git"
 
 install_git() {
     if command -v git >/dev/null 2>&1; then
-        local gv git_src ver_only
-        gv=$(git --version 2>&1)
+        local gv git_src
+        gv=$(tool_version git)
         git_src=$(command -v git)
-        ver_only=$(echo "$gv" | sed -E 's/^git version //')
-        ok "$gv  ($git_src)"
-        set_result git AlreadyInstalled "$ver_only" "$git_src"
+        if [ -z "$gv" ]; then
+            # Typical after a macOS upgrade: Apple's git can't find its developer
+            # tools and prints an "xcrun: error" instead of a version.
+            fail "git is there ($git_src) but doesn't run - Apple's developer tools need repairing."
+            info "Fix: run  xcode-select --install  then re-run this script."
+            info "(If it says the tools are already installed, ask a workshop assistant.)"
+            set_result git Failed "" "$git_src" "git doesn't run - run xcode-select --install, then re-run"
+            return
+        fi
+        ok "git $gv  ($git_src)"
+        set_result git AlreadyInstalled "$gv" "$git_src"
     else
         if [ "$DIAGNOSE_ONLY" -eq 1 ]; then
             warn "git not found. Would install via brew."
@@ -461,10 +644,16 @@ install_git() {
         fi
         info "Installing Git via brew..."
         if "$BREW_BIN" install git; then
+            hash -r
             local gv
-            gv=$(git --version 2>&1)
+            gv=$(tool_version git)
+            if [ -z "$gv" ]; then
+                fail "brew installed git, but it doesn't run."
+                set_result git Failed "" "$(command -v git 2>/dev/null || true)" "Installed, but git --version fails"
+                return
+            fi
             ok "Git installed: $gv"
-            set_result git Installed "$(echo "$gv" | sed -E 's/^git version //')" "$(command -v git)"
+            set_result git Installed "$gv" "$(command -v git)"
         else
             fail "brew install git failed."
             set_result git Failed "" "" "brew install failed"
@@ -494,10 +683,15 @@ step "Checking GitHub CLI (gh)"
 install_gh() {
     if command -v gh >/dev/null 2>&1; then
         local ghv gh_src
-        ghv=$(gh --version 2>&1 | head -n 1)
+        ghv=$(tool_version gh)
         gh_src=$(command -v gh)
-        ok "$ghv  ($gh_src)"
-        set_result gh AlreadyInstalled "$(echo "$ghv" | awk '{print $3}')" "$gh_src"
+        if [ -n "$ghv" ]; then
+            ok "gh $ghv  ($gh_src)"
+            set_result gh AlreadyInstalled "$ghv" "$gh_src"
+        else
+            fail "gh is there ($gh_src) but doesn't run."
+            set_result gh Failed "" "$gh_src" "gh doesn't run - reinstall GitHub CLI, then re-run"
+        fi
         return
     fi
     if [ "$DIAGNOSE_ONLY" -eq 1 ]; then
@@ -507,10 +701,16 @@ install_gh() {
     fi
     info "Installing GitHub CLI via brew..."
     if "$BREW_BIN" install gh; then
+        hash -r
         local ghv
-        ghv=$(gh --version 2>&1 | head -n 1)
-        ok "GitHub CLI installed: $ghv"
-        set_result gh Installed "$(echo "$ghv" | awk '{print $3}')" "$(command -v gh)"
+        ghv=$(tool_version gh)
+        if [ -n "$ghv" ]; then
+            ok "GitHub CLI installed: $ghv"
+            set_result gh Installed "$ghv" "$(command -v gh)"
+        else
+            fail "brew installed gh, but it doesn't run."
+            set_result gh Failed "" "$(command -v gh 2>/dev/null || true)" "Installed, but gh --version fails"
+        fi
     else
         fail "brew install gh failed."
         set_result gh Failed "" "" "brew install failed"
@@ -525,10 +725,15 @@ step "Checking Supabase CLI"
 install_supabase() {
     if command -v supabase >/dev/null 2>&1; then
         local sbv sb_src
-        sbv=$(supabase --version 2>&1 | extract_version)
+        sbv=$(tool_version supabase)
         sb_src=$(command -v supabase)
-        ok "supabase $sbv  ($sb_src)"
-        set_result supabase AlreadyInstalled "$sbv" "$sb_src"
+        if [ -n "$sbv" ]; then
+            ok "supabase $sbv  ($sb_src)"
+            set_result supabase AlreadyInstalled "$sbv" "$sb_src"
+        else
+            fail "supabase is there ($sb_src) but doesn't run."
+            set_result supabase Failed "" "$sb_src" "supabase doesn't run - reinstall it, then re-run"
+        fi
         return
     fi
     if [ "$DIAGNOSE_ONLY" -eq 1 ]; then
@@ -537,12 +742,19 @@ install_supabase() {
         return
     fi
     info "Installing Supabase CLI via brew tap..."
-    # Official install method on macOS — npm install -g supabase is deprecated.
+    # Supabase's own recommended macOS method (their tap is "always up to date";
+    # npm is only supported as a per-project install, not a global one).
     if "$BREW_BIN" install supabase/tap/supabase; then
+        hash -r
         local sbv
-        sbv=$(supabase --version 2>&1 | extract_version)
-        ok "Supabase CLI installed: $sbv"
-        set_result supabase Installed "$sbv" "$(command -v supabase)"
+        sbv=$(tool_version supabase)
+        if [ -n "$sbv" ]; then
+            ok "Supabase CLI installed: $sbv"
+            set_result supabase Installed "$sbv" "$(command -v supabase)"
+        else
+            fail "brew installed supabase, but it doesn't run."
+            set_result supabase Failed "" "$(command -v supabase 2>/dev/null || true)" "Installed, but supabase --version fails"
+        fi
     else
         fail "brew install supabase/tap/supabase failed."
         set_result supabase Failed "" "" "brew install failed"
@@ -557,10 +769,15 @@ step "Checking Vercel CLI"
 install_vercel() {
     if command -v vercel >/dev/null 2>&1; then
         local vcv vc_src
-        vcv=$(vercel --version 2>&1 | extract_version)
+        vcv=$(tool_version vercel)
         vc_src=$(command -v vercel)
-        ok "vercel $vcv  ($vc_src)"
-        set_result vercel AlreadyInstalled "$vcv" "$vc_src"
+        if [ -n "$vcv" ]; then
+            ok "vercel $vcv  ($vc_src)"
+            set_result vercel AlreadyInstalled "$vcv" "$vc_src"
+        else
+            fail "vercel is there ($vc_src) but doesn't run."
+            set_result vercel Failed "" "$vc_src" "vercel doesn't run - reinstall it (npm install -g vercel), then re-run"
+        fi
         return
     fi
     if ! command -v npm >/dev/null 2>&1; then
@@ -569,16 +786,29 @@ install_vercel() {
         return
     fi
     if [ "$DIAGNOSE_ONLY" -eq 1 ]; then
+        ensure_npm_global_writable
         warn "vercel not found. Would install via npm."
         set_result vercel Skipped "" "" "Would install vercel via npm"
         return
     fi
+    ensure_npm_global_writable
     info "Installing Vercel CLI via npm install -g vercel..."
     if npm install -g vercel; then
+        hash -r
         local vcv
-        vcv=$(vercel --version 2>&1 | extract_version)
-        ok "Vercel CLI installed: $vcv"
-        set_result vercel Installed "$vcv" "$(command -v vercel)"
+        if ! command -v vercel >/dev/null 2>&1; then
+            fail "npm reported success but 'vercel' not on PATH."
+            set_result vercel Failed "" "" "Post-install search failed"
+        else
+            vcv=$(tool_version vercel)
+            if [ -n "$vcv" ]; then
+                ok "Vercel CLI installed: $vcv"
+                set_result vercel Installed "$vcv" "$(command -v vercel)"
+            else
+                fail "npm installed vercel, but it doesn't run."
+                set_result vercel Failed "" "$(command -v vercel)" "Installed, but vercel --version fails"
+            fi
+        fi
     else
         fail "npm install -g vercel failed."
         set_result vercel Failed "" "" "npm install failed"
@@ -590,30 +820,50 @@ install_vercel
 # ---------- Claude Code ----------
 if [ "$SKIP_CLAUDE_CODE" -eq 0 ] && [ "$DIAGNOSE_ONLY" -eq 0 ]; then
     step "Installing Claude Code"
+    # Installed earlier by Anthropic's installer but never added to PATH?
+    if ! command -v claude >/dev/null 2>&1 && [ -x "$HOME/.local/bin/claude" ]; then
+        ensure_path_line_in_rc "$HOME/.local/bin" || true
+        hash -r
+    fi
+    cl_src=""; cv=""
     if command -v claude >/dev/null 2>&1; then
-        cv=$(claude --version 2>&1 || true)
         cl_src=$(command -v claude)
+        cv=$(tool_version claude)
+    fi
+    if [ -n "$cv" ]; then
         ok "Claude Code already installed: $cv  ($cl_src)"
         set_result claude AlreadyInstalled "$cv" "$cl_src"
     else
-        if ! command -v npm >/dev/null 2>&1; then
-            fail "npm not available - cannot install Claude Code."
-            set_result claude Failed "" "" "npm not available"
-        else
-            info "Installing Claude Code via npm install -g @anthropic-ai/claude-code..."
-            if npm install -g "@anthropic-ai/claude-code"; then
-                if command -v claude >/dev/null 2>&1; then
-                    cv=$(claude --version 2>&1 || true)
-                    ok "Claude Code: $cv"
-                    set_result claude Installed "$cv" "$(command -v claude)"
-                else
-                    fail "npm reported success but 'claude' not on PATH."
-                    set_result claude Failed "" "" "Post-install search failed"
-                fi
-            else
-                fail "npm install -g @anthropic-ai/claude-code failed."
-                set_result claude Failed "" "" "npm install failed"
+        if [ -n "$cl_src" ]; then
+            warn "claude is there ($cl_src) but doesn't start - reinstalling it."
+            # A broken npm copy (npm 12+ skips its setup step) would keep being
+            # found first, so remove it before installing the real one.
+            if is_npm_claude "$cl_src" && command -v npm >/dev/null 2>&1; then
+                info "Removing the broken npm copy of Claude Code..."
+                npm uninstall -g "@anthropic-ai/claude-code" || true
+                hash -r
             fi
+        fi
+        info "Installing Claude Code with Anthropic's installer (https://claude.ai/install.sh)..."
+        if install_claude_native; then
+            cv=$(tool_version claude)
+            if [ -z "$cv" ] && [ -x "$HOME/.local/bin/claude" ]; then
+                # Something older is still found first - put ~/.local/bin in front.
+                ensure_path_line_in_rc "$HOME/.local/bin" first || true
+                hash -r
+                cv=$(tool_version claude)
+            fi
+            if [ -n "$cv" ]; then
+                ok "Claude Code installed: $cv  ($(command -v claude))"
+                set_result claude Installed "$cv" "$(command -v claude)"
+            else
+                fail "Claude Code installed, but it doesn't start."
+                set_result claude Failed "" "$(command -v claude 2>/dev/null || true)" "Installed, but claude --version fails - ask an assistant"
+            fi
+        else
+            fail "Anthropic's Claude Code installer failed (no internet, or Claude isn't available in this region)."
+            info "Check the internet connection, then re-run. Details: https://code.claude.com/docs/en/setup"
+            set_result claude Failed "" "" "Installer failed - check the internet, then re-run"
         fi
     fi
 fi
@@ -623,16 +873,21 @@ if ! has_result claude; then
         set_result claude Skipped "" "" "Skipped via --skip-claude-code flag"
     elif [ "$DIAGNOSE_ONLY" -eq 1 ]; then
         if command -v claude >/dev/null 2>&1; then
-            cv=$(claude --version 2>&1 || true)
-            set_result claude AlreadyInstalled "$cv" "$(command -v claude)"
+            cv=$(tool_version claude)
+            if [ -n "$cv" ]; then
+                set_result claude AlreadyInstalled "$cv" "$(command -v claude)"
+            else
+                set_result claude Failed "" "$(command -v claude)" "claude doesn't start - a normal run reinstalls it"
+            fi
         else
-            set_result claude Skipped "" "" "Would install via npm"
+            set_result claude Skipped "" "" "Would install with Anthropic's installer"
         fi
     fi
 fi
 
 # ---------- Final verification (re-check every tool with --version) ----------
 step "Final verification"
+hash -r
 
 reverify=(python3 node npm git gh supabase vercel)
 [ "$SKIP_CLAUDE_CODE" -eq 0 ] && reverify+=(claude)
@@ -642,9 +897,13 @@ for tool in "${reverify[@]}"; do
     key="$tool"
     [ "$tool" = "python3" ] && key="python"
     if command -v "$tool" >/dev/null 2>&1; then
-        v=$("$tool" --version 2>&1 | extract_version)
+        v=$(tool_version "$tool")
         if ! has_result "$key"; then
-            set_result "$key" AlreadyInstalled "$v" "$(command -v "$tool")"
+            if [ -n "$v" ]; then
+                set_result "$key" AlreadyInstalled "$v" "$(command -v "$tool")"
+            else
+                set_result "$key" Failed "" "$(command -v "$tool")" "Found, but didn't report a version (broken install?)"
+            fi
         fi
     else
         if ! has_result "$key"; then
@@ -703,8 +962,8 @@ fi
 END_EPOCH=$(date +%s)
 ELAPSED=$((END_EPOCH - START_EPOCH))
 say "  Total time: $((ELAPSED / 60)) min $(printf '%02d' $((ELAPSED % 60))) sec" "$C_GRAY"
-say "  Backups: $BACKUP_DIR" "$C_GRAY"
 if [ "$DIAGNOSE_ONLY" -eq 0 ]; then
+    say "  Backups: $BACKUP_DIR" "$C_GRAY"
     say "=================================================================" "$C_CYAN"
     say "  RAISE YOUR HAND and wait for a workshop assistant to check" "$C_YELLOW"
     say "  this screen with you BEFORE you close this window." "$C_YELLOW"
