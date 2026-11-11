@@ -4,6 +4,8 @@ Welcome! Finish every step below **before** workshop day. Don't wait until the m
 
 Steps marked **★ Must have** are the absolute baseline to attend. The rest are still required.
 
+> **Mac users — check this first:** Apple menu → **About This Mac**. You need **macOS 13.5 (Ventura) or newer**. If yours is older, open **System Settings → General → Software Update** and install what's offered. If nothing newer is offered, your Mac is too old for the workshop tools — message us on WhatsApp so we can sort out a laptop before the day.
+
 ---
 
 ## Step 1 — Gmail Account

@@ -21,8 +21,12 @@
 #    - Verifies the tool runs in this same shell and reports a real version
 #
 #  It also:
+#    - Stops early, with a plain message, on Macs too old for the tools
+#      (they need macOS 13.5 or newer)
 #    - Bootstraps Xcode Command Line Tools if missing (needed for git, brew)
-#    - Bootstraps Homebrew if missing
+#    - Bootstraps Homebrew if missing - on Apple-chip Macs with macOS 15+.
+#      Intel Macs and older macOS skip Homebrew (it no longer has ready-made
+#      packages for them) and download each tool's official version directly.
 #    - Makes plain `python3` run the workshop Python (not Apple's old 3.9)
 #    - Moves npm's install folder to ~/.npm-global if the system one is locked
 #    - Backs up ~/.zshrc, ~/.bash_profile and ~/.npmrc before any change
@@ -36,6 +40,7 @@
 #      bash fix-vibecode-mac.sh                # full install + repair
 #      bash fix-vibecode-mac.sh --diagnose-only   # read-only — show what would change
 #      bash fix-vibecode-mac.sh --skip-claude-code
+#      bash fix-vibecode-mac.sh --no-homebrew      # always use direct downloads
 # =============================================================================
 
 # ---------- Bash-only guard (must run BEFORE any bash-specific syntax) ----------
@@ -52,10 +57,12 @@ set -u   # error on unset vars; we deliberately handle command failures by hand.
 # ---------- Flag parsing ----------
 DIAGNOSE_ONLY=0
 SKIP_CLAUDE_CODE=0
+FORCE_DIRECT=0
 for arg in "$@"; do
     case "$arg" in
         --diagnose-only|-d) DIAGNOSE_ONLY=1 ;;
         --skip-claude-code) SKIP_CLAUDE_CODE=1 ;;
+        --no-homebrew) FORCE_DIRECT=1 ;;
         -h|--help)
             grep '^#' "$0" | sed 's/^# \{0,1\}//'
             exit 0 ;;
@@ -229,9 +236,31 @@ major_of() {
     echo "$m"
 }
 
-# True if <dir> is writable, or doesn't exist yet but could be created.
+# version_at_least <have> <need>: compares up to three numbers, so that
+# 13.4 < 13.5.0 and 3.14.10 > 3.14.9.
+version_at_least() {
+    local IFS=.
+    local -a have need
+    read -r -a have <<< "$1"
+    read -r -a need <<< "$2"
+    local i h n
+    for i in 0 1 2; do
+        h=${have[$i]:-0}; n=${need[$i]:-0}
+        h=${h%%[!0-9]*}; n=${n%%[!0-9]*}
+        h=${h:-0}; n=${n:-0}
+        if [ "$h" -gt "$n" ]; then return 0; fi
+        if [ "$h" -lt "$n" ]; then return 1; fi
+    done
+    return 0
+}
+ver_ge() { version_at_least "$1" "$2"; }   # ver_ge <a> <b>: a >= b
+
+# True if <dir> is writable, or doesn't exist yet but could be created
+# (its nearest existing parent folder is writable).
 can_write_dir() {
-    [ -w "$1" ] || { [ ! -e "$1" ] && [ -w "$(dirname "$1")" ]; }
+    local d="$1"
+    while [ ! -e "$d" ] && [ "$d" != "/" ] && [ "$d" != "." ]; do d=$(dirname "$d"); done
+    [ -w "$d" ]
 }
 
 # The Node installer from nodejs.org (which the prep guide points Mac students
@@ -292,6 +321,243 @@ is_npm_claude() {
     return 1
 }
 
+# ---------- Direct downloads (for Macs Homebrew no longer supports) ----------
+# Each tool's official ready-made download, checked against its published
+# fingerprint (SHA-256) - or, for Python, Apple's signature check - before it
+# is installed. Everything except Python goes into the user's home folder, so
+# only Python needs the Mac password.
+LOCAL_BIN="$HOME/.local/bin"
+NODE_DIR="$HOME/.local/node"
+NODE_LTS_MAJOR=26   # current Node.js LTS line; move to the next LTS when it arrives
+
+# download <url> <file> [sha256]: fetch a file; with a checksum, verify it.
+download() {
+    local url="$1" out="$2" want="${3:-}" got
+    if ! curl -fsSL --retry 3 --connect-timeout 20 -o "$out" "$url"; then
+        fail "Download failed: $url"
+        return 1
+    fi
+    if [ -n "$want" ]; then
+        got=$(shasum -a 256 "$out" | awk '{print $1}')
+        if [ "$got" != "$want" ]; then
+            fail "Download didn't match its official fingerprint (checksum): $url"
+            return 1
+        fi
+    fi
+    return 0
+}
+
+# Latest release version of a GitHub project (e.g. "2.103.3"), read from the
+# "latest" page redirect rather than GitHub's API, so 30 students sharing one
+# hotspot don't hit the API's hourly limit.
+github_latest_version() {
+    local url
+    url=$(curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/$1/releases/latest") || return 1
+    case "$url" in */tag/*) ;; *) return 1 ;; esac
+    url=${url##*/tag/}
+    echo "${url#v}"
+}
+
+# The Mac's chip as each project spells it in its download file names.
+node_arch() { if [ "$MAC_ARCH" = "arm64" ]; then echo arm64; else echo x64; fi; }
+go_arch()   { if [ "$MAC_ARCH" = "arm64" ]; then echo arm64; else echo amd64; fi; }
+
+# python_pkg_trusted <pkg>: true only if Apple confirms the installer is signed
+# with the Python Software Foundation's own Apple developer ID - exact name
+# AND team ID, so a look-alike signer can't pass - and, where macOS reports
+# it, notarized by Apple. python.org's macOS installers are all signed this way.
+PSF_INSTALLER_ID='Developer ID Installer: Python Software Foundation (BMM5U3QVKW)'
+python_pkg_trusted() {
+    local sig
+    sig=$(pkgutil --check-signature "$1" 2>&1) || return 1
+    printf '%s\n' "$sig" | grep -q '^[[:space:]]*Status: signed by a developer certificate issued by Apple' || return 1
+    printf '%s\n' "$sig" | grep -Fx -q "    1. $PSF_INSTALLER_ID" \
+        || printf '%s\n' "$sig" | sed 's/^[[:space:]]*//' | grep -Fx -q "1. $PSF_INSTALLER_ID" \
+        || return 1
+    if printf '%s\n' "$sig" | grep -q '^[[:space:]]*Notarization:'; then
+        printf '%s\n' "$sig" | grep -q '^[[:space:]]*Notarization: trusted by the Apple notary service' || return 1
+    fi
+    return 0
+}
+
+direct_install_python() {
+    # Newest Python 3.14.x installer from python.org, signed by the Python
+    # Software Foundation. It installs for the whole Mac, hence the password.
+    local ver="" v pkg tmp certs
+    for v in $(curl -fsSL https://www.python.org/ftp/python/ | grep -oE 'href="3\.14\.[0-9]+/"' \
+                 | grep -oE '3\.14\.[0-9]+' | sort -t. -k3,3nr | head -n 3); do
+        if curl -fsSLI -o /dev/null "https://www.python.org/ftp/python/$v/python-$v-macos11.pkg"; then
+            ver="$v"; break
+        fi
+    done
+    if [ -z "$ver" ]; then
+        fail "Could not find the Python 3.14 installer on python.org."
+        return 1
+    fi
+    pkg="python-$ver-macos11.pkg"
+    tmp=$(mktemp -d)
+    info "Downloading $pkg from python.org..."
+    if ! download "https://www.python.org/ftp/python/$ver/$pkg" "$tmp/$pkg"; then
+        rm -rf "$tmp"; return 1
+    fi
+    if ! python_pkg_trusted "$tmp/$pkg"; then
+        fail "That installer isn't signed by the Python Software Foundation's Apple developer ID - not installing it."
+        rm -rf "$tmp"; return 1
+    fi
+    info "Installing Python $ver - type your Mac password if asked (nothing shows while you type)."
+    if ! sudo installer -pkg "$tmp/$pkg" -target /; then
+        fail "The Python installer failed."
+        rm -rf "$tmp"; return 1
+    fi
+    rm -rf "$tmp"
+    # python.org's own certificate step, so Python can check HTTPS websites.
+    certs="/Applications/Python 3.14/Install Certificates.command"
+    if [ -f "$certs" ] && ! sh "$certs" </dev/null >/dev/null 2>&1; then
+        warn "Python's certificate setup didn't finish - HTTPS from Python may fail."
+    fi
+    return 0
+}
+
+direct_install_node() {
+    # Official Node.js LTS from nodejs.org, unpacked into ~/.local/node: no
+    # password, and npm can install tools without "permission denied".
+    local base="https://nodejs.org/dist/latest-v${NODE_LTS_MAJOR}.x" line sha file tmp
+    line=$(curl -fsSL "$base/SHASUMS256.txt" | grep -E "  node-v[0-9.]+-darwin-$(node_arch)\.tar\.gz\$" | head -n 1)
+    if [ -z "$line" ]; then
+        fail "Could not look up the latest Node.js $NODE_LTS_MAJOR release on nodejs.org."
+        return 1
+    fi
+    sha=${line%% *}
+    file=${line##* }
+    tmp=$(mktemp -d)
+    info "Downloading $file from nodejs.org..."
+    if ! download "$base/$file" "$tmp/$file" "$sha"; then
+        rm -rf "$tmp"; return 1
+    fi
+    if ! tar -xzf "$tmp/$file" -C "$tmp"; then
+        fail "Could not unpack $file."
+        rm -rf "$tmp"; return 1
+    fi
+    rm -rf "$NODE_DIR"
+    mkdir -p "$(dirname "$NODE_DIR")"
+    mv "$tmp/${file%.tar.gz}" "$NODE_DIR"
+    rm -rf "$tmp"
+    ensure_path_line_in_rc "$NODE_DIR/bin" first || true
+    hash -r
+    return 0
+}
+
+direct_install_gh() {
+    # Official GitHub CLI release from github.com/cli/cli.
+    local ver asset base sha tmp
+    if ! ver=$(github_latest_version cli/cli); then
+        fail "Could not look up the latest GitHub CLI release."
+        return 1
+    fi
+    asset="gh_${ver}_macOS_$(go_arch).zip"
+    base="https://github.com/cli/cli/releases/download/v${ver}"
+    sha=$(curl -fsSL "$base/gh_${ver}_checksums.txt" | awk -v f="$asset" '$2 == f {print $1}')
+    if [ -z "$sha" ]; then
+        fail "Could not get the GitHub CLI download fingerprint (checksum)."
+        return 1
+    fi
+    tmp=$(mktemp -d)
+    info "Downloading GitHub CLI $ver..."
+    if ! download "$base/$asset" "$tmp/$asset" "$sha"; then
+        rm -rf "$tmp"; return 1
+    fi
+    if ! unzip -q "$tmp/$asset" -d "$tmp" || [ ! -f "$tmp/${asset%.zip}/bin/gh" ]; then
+        fail "Could not unpack $asset."
+        rm -rf "$tmp"; return 1
+    fi
+    mkdir -p "$LOCAL_BIN"
+    cp "$tmp/${asset%.zip}/bin/gh" "$LOCAL_BIN/gh"
+    chmod 755 "$LOCAL_BIN/gh"
+    rm -rf "$tmp"
+    ensure_path_line_in_rc "$LOCAL_BIN" || true
+    hash -r
+    return 0
+}
+
+direct_install_supabase() {
+    # Official Supabase CLI release from github.com/supabase/cli.
+    local ver asset base sha tmp
+    if ! ver=$(github_latest_version supabase/cli); then
+        fail "Could not look up the latest Supabase CLI release."
+        return 1
+    fi
+    asset="supabase_${ver}_darwin_$(go_arch).tar.gz"
+    base="https://github.com/supabase/cli/releases/download/v${ver}"
+    sha=$(curl -fsSL "$base/checksums.txt" | awk -v f="$asset" '$2 == f {print $1}')
+    if [ -z "$sha" ]; then
+        fail "Could not get the Supabase CLI download fingerprint (checksum)."
+        return 1
+    fi
+    tmp=$(mktemp -d)
+    info "Downloading Supabase CLI $ver..."
+    if ! download "$base/$asset" "$tmp/$asset" "$sha"; then
+        rm -rf "$tmp"; return 1
+    fi
+    if ! tar -xzf "$tmp/$asset" -C "$tmp" || [ ! -f "$tmp/supabase" ]; then
+        fail "Could not unpack $asset."
+        rm -rf "$tmp"; return 1
+    fi
+    mkdir -p "$LOCAL_BIN"
+    cp "$tmp/supabase" "$LOCAL_BIN/supabase"
+    chmod 755 "$LOCAL_BIN/supabase"
+    rm -rf "$tmp"
+    ensure_path_line_in_rc "$LOCAL_BIN" || true
+    hash -r
+    return 0
+}
+
+# ---------- Which Mac is this? ----------
+step "Checking this Mac"
+MAC_VER=$(sw_vers -productVersion 2>/dev/null || echo 0)
+MAC_ARCH=$(uname -m)
+if [ "$MAC_ARCH" = "x86_64" ] && [ "$(sysctl -n sysctl.proc_translated 2>/dev/null)" = "1" ]; then
+    MAC_ARCH=arm64   # Terminal is running under Rosetta on an Apple-chip Mac
+fi
+if [ "$MAC_ARCH" = "arm64" ]; then CHIP_NAME="an Apple chip"; else CHIP_NAME="an Intel chip"; fi
+ok "macOS $MAC_VER on $CHIP_NAME"
+
+# The workshop tools need macOS 13.5+: Claude Code, GitHub CLI and Supabase
+# need 13.0+, and Node.js 26 needs 13.5+. No script can fix an older Mac.
+MIN_MACOS=13.5
+if ! version_at_least "$MAC_VER" "$MIN_MACOS"; then
+    fail "This Mac runs macOS $MAC_VER - the workshop tools need macOS $MIN_MACOS or newer."
+    if version_at_least "$MAC_VER" "13.0"; then
+        info "A free update is waiting: System Settings > General > Software Update."
+        info "Install it, then run this script again."
+    else
+        info "Look for a free update: System Settings > General > Software Update"
+        info "(on older Macs: Apple menu > System Preferences > Software Update)."
+        info "If macOS 13 (Ventura) or newer isn't offered, this Mac is too old for"
+        info "the workshop tools - please bring or borrow a newer laptop."
+    fi
+    echo ""
+    say "  RAISE YOUR HAND so a workshop assistant can help." "$C_YELLOW"
+    exit 3
+fi
+
+# Homebrew only has ready-made ("bottled") packages for Apple-chip Macs on
+# macOS 15 or newer (as of Nov 2026). Anywhere else it builds every tool from
+# source, which can take hours - so those Macs get each tool's official
+# ready-made download instead (the "direct" route).
+INSTALL_ROUTE=brew
+if [ "$FORCE_DIRECT" -eq 1 ] || [ "$MAC_ARCH" != "arm64" ] || ! version_at_least "$MAC_VER" "15.0"; then
+    INSTALL_ROUTE=direct
+    if [ "$FORCE_DIRECT" -eq 1 ]; then
+        info "--no-homebrew: missing tools will be downloaded directly from their official sites."
+    elif [ "$MAC_ARCH" != "arm64" ]; then
+        info "Homebrew no longer has ready-made packages for Intel Macs, so missing"
+        info "tools will be downloaded directly from their official sites instead."
+    else
+        info "This macOS is older than Homebrew supports, so missing tools will be"
+        info "downloaded directly from their official sites instead."
+    fi
+fi
+
 # ---------- Preflight: Xcode Command Line Tools (needed for brew, git) ----------
 step "Checking Xcode Command Line Tools"
 if xcode-select -p >/dev/null 2>&1; then
@@ -320,13 +586,16 @@ if command -v brew >/dev/null 2>&1; then
     BREW_BIN="$(command -v brew)"
 elif [ -x /opt/homebrew/bin/brew ]; then
     BREW_BIN="/opt/homebrew/bin/brew"
-    eval "$('/opt/homebrew/bin/brew' shellenv)"
 elif [ -x /usr/local/bin/brew ]; then
     BREW_BIN="/usr/local/bin/brew"
-    eval "$('/usr/local/bin/brew' shellenv)"
 fi
 
-if [ -n "$BREW_BIN" ]; then
+if [ "$INSTALL_ROUTE" = direct ]; then
+    # Never used to install anything on this Mac (see "Checking this Mac").
+    info "Skipping Homebrew - missing tools will be downloaded directly instead."
+elif [ -n "$BREW_BIN" ]; then
+    # Make sure this shell can find brew and everything it installs.
+    command -v brew >/dev/null 2>&1 || eval "$("$BREW_BIN" shellenv)"
     ok "Homebrew: $($BREW_BIN --version | head -n 1)  ($BREW_BIN)"
 else
     if [ "$DIAGNOSE_ONLY" -eq 1 ]; then
@@ -417,11 +686,6 @@ find_python_candidates() {
     } | awk '!seen[$0]++'
 }
 
-ver_ge() {
-    # ver_ge <a> <b> -> success if a >= b (semver-ish, ignores pre-release)
-    [ "$(printf '%s\n%s\n' "$1" "$2" | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1)" = "$1" ]
-}
-
 python_cmd_dir() {
     # python_cmd_dir <python exe> <version>
     # Folder to put first on PATH so plain `python3` runs this Python.
@@ -502,13 +766,40 @@ install_python() {
     fi
 
     if [ -n "$best_path" ]; then
-        warn "Found Python $best_ver, but workshop requires 3.14+. Will install via brew."
+        warn "Found Python $best_ver, but workshop requires 3.14+. Will install Python 3.14."
     else
         warn "No suitable Python found."
     fi
 
     if [ "$DIAGNOSE_ONLY" -eq 1 ]; then
-        set_result python Skipped "" "" "Would install python@3.14 via brew"
+        if [ "$INSTALL_ROUTE" = direct ]; then
+            set_result python Skipped "" "" "Would install Python 3.14 from python.org"
+        else
+            set_result python Skipped "" "" "Would install python@3.14 via brew"
+        fi
+        return
+    fi
+
+    if [ "$INSTALL_ROUTE" = direct ]; then
+        local dnewp="" dv="" dp
+        if direct_install_python; then
+            hash -r
+            for dp in /Library/Frameworks/Python.framework/Versions/3.14/bin/python3.14 /usr/local/bin/python3.14; do
+                if [ -x "$dp" ]; then
+                    dv=$(tool_version "$dp")
+                    if [ -n "$dv" ] && ver_ge "$dv" "3.14.0"; then dnewp="$dp"; break; fi
+                fi
+            done
+            if [ -n "$dnewp" ]; then
+                ok "Python $dv installed: $dnewp"
+                use_python "$dnewp" "$dv" Installed
+            else
+                fail "The Python installer finished, but Python 3.14 wasn't found."
+                set_result python Failed "" "" "Post-install search failed"
+            fi
+        else
+            set_result python Failed "" "" "Python download/install failed - check the internet, then re-run"
+        fi
         return
     fi
 
@@ -563,12 +854,17 @@ install_node() {
         if node_too_old "$(major_of "$nv")"; then
             warn "Node ${nv:-(broken)} is too old or out of support (need v$NODE_MIN_MAJOR+, not 23/25)."
             if [ "$DIAGNOSE_ONLY" -eq 0 ]; then
-                info "Upgrading Node via brew..."
-                # `brew install` won't upgrade a Node that brew already manages.
-                if "$BREW_BIN" list --versions node >/dev/null 2>&1; then
-                    "$BREW_BIN" upgrade node || true
+                if [ "$INSTALL_ROUTE" = direct ]; then
+                    info "Upgrading: downloading Node.js $NODE_LTS_MAJOR from nodejs.org..."
+                    direct_install_node || true
                 else
-                    "$BREW_BIN" install node || true
+                    info "Upgrading Node via brew..."
+                    # `brew install` won't upgrade a Node that brew already manages.
+                    if "$BREW_BIN" list --versions node >/dev/null 2>&1; then
+                        "$BREW_BIN" upgrade node || true
+                    else
+                        "$BREW_BIN" install node || true
+                    fi
                 fi
                 hash -r
                 local nv2 node2_src
@@ -593,7 +889,28 @@ install_node() {
 
     warn "node not on PATH."
     if [ "$DIAGNOSE_ONLY" -eq 1 ]; then
-        set_result node Skipped "" "" "Would install node via brew"
+        if [ "$INSTALL_ROUTE" = direct ]; then
+            set_result node Skipped "" "" "Would download Node.js $NODE_LTS_MAJOR from nodejs.org"
+        else
+            set_result node Skipped "" "" "Would install node via brew"
+        fi
+        return
+    fi
+
+    if [ "$INSTALL_ROUTE" = direct ]; then
+        local dnv
+        if direct_install_node; then
+            dnv=$(tool_version node)
+            if [ -n "$dnv" ]; then
+                ok "Node $dnv installed: $(command -v node)"
+                set_result node Installed "$dnv" "$(command -v node)"
+            else
+                fail "Node.js downloaded, but it doesn't run."
+                set_result node Failed "" "$(command -v node 2>/dev/null || true)" "Downloaded, but node --version fails"
+            fi
+        else
+            set_result node Failed "" "" "Node.js download failed - check the internet, then re-run"
+        fi
         return
     fi
 
@@ -637,6 +954,13 @@ install_git() {
         ok "git $gv  ($git_src)"
         set_result git AlreadyInstalled "$gv" "$git_src"
     else
+        if [ "$INSTALL_ROUTE" = direct ]; then
+            # On this route git comes from Apple's developer tools (checked above).
+            fail "git not found - it comes with Apple's developer tools."
+            info "Fix: run  xcode-select --install  then re-run this script."
+            set_result git Failed "" "" "Run xcode-select --install, then re-run"
+            return
+        fi
         if [ "$DIAGNOSE_ONLY" -eq 1 ]; then
             warn "git not found. Would install via brew."
             set_result git Skipped "" "" "Would install git via brew"
@@ -695,8 +1019,29 @@ install_gh() {
         return
     fi
     if [ "$DIAGNOSE_ONLY" -eq 1 ]; then
-        warn "gh not found. Would install via brew."
-        set_result gh Skipped "" "" "Would install gh via brew"
+        if [ "$INSTALL_ROUTE" = direct ]; then
+            warn "gh not found. Would download it from GitHub."
+            set_result gh Skipped "" "" "Would download GitHub CLI from GitHub"
+        else
+            warn "gh not found. Would install via brew."
+            set_result gh Skipped "" "" "Would install gh via brew"
+        fi
+        return
+    fi
+    if [ "$INSTALL_ROUTE" = direct ]; then
+        local dghv
+        if direct_install_gh; then
+            dghv=$(tool_version gh)
+            if [ -n "$dghv" ]; then
+                ok "GitHub CLI installed: $dghv"
+                set_result gh Installed "$dghv" "$(command -v gh)"
+            else
+                fail "GitHub CLI downloaded, but it doesn't run."
+                set_result gh Failed "" "$(command -v gh 2>/dev/null || true)" "Downloaded, but gh --version fails"
+            fi
+        else
+            set_result gh Failed "" "" "GitHub CLI download failed - check the internet, then re-run"
+        fi
         return
     fi
     info "Installing GitHub CLI via brew..."
@@ -737,8 +1082,29 @@ install_supabase() {
         return
     fi
     if [ "$DIAGNOSE_ONLY" -eq 1 ]; then
-        warn "supabase not found. Would install via brew (supabase/tap/supabase)."
-        set_result supabase Skipped "" "" "Would install via brew tap"
+        if [ "$INSTALL_ROUTE" = direct ]; then
+            warn "supabase not found. Would download it from GitHub."
+            set_result supabase Skipped "" "" "Would download Supabase CLI from GitHub"
+        else
+            warn "supabase not found. Would install via brew (supabase/tap/supabase)."
+            set_result supabase Skipped "" "" "Would install via brew tap"
+        fi
+        return
+    fi
+    if [ "$INSTALL_ROUTE" = direct ]; then
+        local dsbv
+        if direct_install_supabase; then
+            dsbv=$(tool_version supabase)
+            if [ -n "$dsbv" ]; then
+                ok "Supabase CLI installed: $dsbv"
+                set_result supabase Installed "$dsbv" "$(command -v supabase)"
+            else
+                fail "Supabase CLI downloaded, but it doesn't run."
+                set_result supabase Failed "" "$(command -v supabase 2>/dev/null || true)" "Downloaded, but supabase --version fails"
+            fi
+        else
+            set_result supabase Failed "" "" "Supabase CLI download failed - check the internet, then re-run"
+        fi
         return
     fi
     info "Installing Supabase CLI via brew tap..."
@@ -781,8 +1147,13 @@ install_vercel() {
         return
     fi
     if ! command -v npm >/dev/null 2>&1; then
-        warn "npm not available - cannot install Vercel CLI."
-        set_result vercel Failed "" "" "npm not available"
+        if [ "$DIAGNOSE_ONLY" -eq 1 ]; then
+            warn "vercel not found. Would install via npm once Node is installed."
+            set_result vercel Skipped "" "" "Would install via npm (after Node)"
+        else
+            warn "npm not available - cannot install Vercel CLI."
+            set_result vercel Failed "" "" "npm not available"
+        fi
         return
     fi
     if [ "$DIAGNOSE_ONLY" -eq 1 ]; then
@@ -907,7 +1278,11 @@ for tool in "${reverify[@]}"; do
         fi
     else
         if ! has_result "$key"; then
-            set_result "$key" Failed "" "" "Not on PATH in this shell"
+            if [ "$DIAGNOSE_ONLY" -eq 1 ]; then
+                set_result "$key" Skipped "" "" "Not installed yet"
+            else
+                set_result "$key" Failed "" "" "Not on PATH in this shell"
+            fi
         fi
     fi
 done
@@ -958,6 +1333,12 @@ else
     if [ -n "$LOG_PATH" ]; then
         say "  Log: $LOG_PATH" ""
     fi
+fi
+if [ "$INSTALL_ROUTE" = direct ] && [ "$MAC_ARCH" = "arm64" ] && [ "$FORCE_DIRECT" -eq 0 ]; then
+    echo ""
+    say "  Tip: this Mac's macOS ($MAC_VER) is out of date. Everything above works," "$C_YELLOW"
+    say "  but please update it when convenient (it's free): System Settings >" "$C_YELLOW"
+    say "  General > Software Update." "$C_YELLOW"
 fi
 END_EPOCH=$(date +%s)
 ELAPSED=$((END_EPOCH - START_EPOCH))
