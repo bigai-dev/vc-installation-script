@@ -362,6 +362,24 @@ github_latest_version() {
 node_arch() { if [ "$MAC_ARCH" = "arm64" ]; then echo arm64; else echo x64; fi; }
 go_arch()   { if [ "$MAC_ARCH" = "arm64" ]; then echo arm64; else echo amd64; fi; }
 
+# python_pkg_trusted <pkg>: true only if Apple confirms the installer is signed
+# with the Python Software Foundation's own Apple developer ID - exact name
+# AND team ID, so a look-alike signer can't pass - and, where macOS reports
+# it, notarized by Apple. python.org's macOS installers are all signed this way.
+PSF_INSTALLER_ID='Developer ID Installer: Python Software Foundation (BMM5U3QVKW)'
+python_pkg_trusted() {
+    local sig
+    sig=$(pkgutil --check-signature "$1" 2>&1) || return 1
+    printf '%s\n' "$sig" | grep -q '^[[:space:]]*Status: signed by a developer certificate issued by Apple' || return 1
+    printf '%s\n' "$sig" | grep -Fx -q "    1. $PSF_INSTALLER_ID" \
+        || printf '%s\n' "$sig" | sed 's/^[[:space:]]*//' | grep -Fx -q "1. $PSF_INSTALLER_ID" \
+        || return 1
+    if printf '%s\n' "$sig" | grep -q '^[[:space:]]*Notarization:'; then
+        printf '%s\n' "$sig" | grep -q '^[[:space:]]*Notarization: trusted by the Apple notary service' || return 1
+    fi
+    return 0
+}
+
 direct_install_python() {
     # Newest Python 3.14.x installer from python.org, signed by the Python
     # Software Foundation. It installs for the whole Mac, hence the password.
@@ -382,8 +400,8 @@ direct_install_python() {
     if ! download "https://www.python.org/ftp/python/$ver/$pkg" "$tmp/$pkg"; then
         rm -rf "$tmp"; return 1
     fi
-    if ! pkgutil --check-signature "$tmp/$pkg" 2>/dev/null | grep -q "Python Software Foundation"; then
-        fail "That installer isn't signed by the Python Software Foundation - not installing it."
+    if ! python_pkg_trusted "$tmp/$pkg"; then
+        fail "That installer isn't signed by the Python Software Foundation's Apple developer ID - not installing it."
         rm -rf "$tmp"; return 1
     fi
     info "Installing Python $ver - type your Mac password if asked (nothing shows while you type)."
