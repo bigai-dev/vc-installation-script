@@ -136,14 +136,29 @@ jobs:
           if-no-files-found: ignore
 
   mac:
-    name: Mac (${{ matrix.os }})
+    name: Mac (${{ matrix.os }}, ${{ matrix.route }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        # Apple-chip Macs on the two newest macOS versions.
-        os: [macos-15, macos-26]
+        include:
+          # Apple-chip Macs on current macOS: the Homebrew route.
+          - os: macos-15
+            route: Homebrew
+          - os: macos-26
+            route: Homebrew
+          # Older Macs: each tool's official download instead of Homebrew.
+          # Their pre-installed tools are removed first, so every download,
+          # fingerprint check and install step really runs.
+          - os: macos-14          # Apple chip on macOS 14 (older than Homebrew supports)
+            route: direct downloads
+            fresh: true
+          - os: macos-15-intel    # Intel Mac
+            route: direct downloads
+            fresh: true
+    env:
+      FRESH: ${{ matrix.fresh }}
     steps:
       - uses: actions/checkout@v7
 
@@ -153,12 +168,41 @@ jobs:
           /bin/bash -n script/run-fixer.command
           echo "No syntax errors."
 
+      - name: Remove the cloud Mac's pre-installed tools (older-Mac jobs)
+        if: matrix.fresh
+        run: |
+          # A student's older Mac usually has none of these, so take them away
+          # and make the fixer download each one itself.
+          brew list --formula | grep -E '^(node|node@[0-9]+|python@3\.[0-9]+|gh|supabase)$' \
+            | xargs -n 1 brew uninstall --ignore-dependencies --force 2>/dev/null || true
+          # Hide any python.org Python too (moved aside, not deleted).
+          if [ -d /Library/Frameworks/Python.framework ]; then
+            sudo mv /Library/Frameworks/Python.framework /Library/Frameworks/Python.framework.hidden
+          fi
+          echo "Left on the default PATH:"
+          for t in python3 node npm gh supabase vercel claude; do
+            printf '  %-9s %s\n' "$t" "$(PATH=/usr/local/bin:/usr/bin:/bin command -v "$t" || echo '-')"
+          done
+
       - name: Check-only run (--diagnose-only)
-        run: /bin/bash script/fix-vibecode-mac.sh --diagnose-only
+        run: |
+          if [ "$FRESH" = "true" ]; then
+            # Clean environment, like a brand-new Terminal on a student's Mac.
+            env -i HOME="$HOME" USER="$USER" LOGNAME="$USER" SHELL="$SHELL" TERM=dumb \
+              PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin /bin/bash script/fix-vibecode-mac.sh --diagnose-only
+          else
+            /bin/bash script/fix-vibecode-mac.sh --diagnose-only
+          fi
 
       - name: Full run
         timeout-minutes: 45
-        run: /bin/bash script/fix-vibecode-mac.sh
+        run: |
+          if [ "$FRESH" = "true" ]; then
+            env -i HOME="$HOME" USER="$USER" LOGNAME="$USER" SHELL="$SHELL" TERM=dumb \
+              PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin /bin/bash script/fix-vibecode-mac.sh
+          else
+            /bin/bash script/fix-vibecode-mac.sh
+          fi
 
       - name: Every tool is OK in the final table
         run: |
@@ -171,15 +215,19 @@ jobs:
           fi
           grep -q 'All tools are working' "$log" || { echo "::error::The fixer did not finish with 'All tools are working'"; exit 1; }
 
-      - name: Python and Claude Code work in a brand-new Terminal window
+      - name: Every tool works in a brand-new Terminal window
         run: |
           # A clean login shell, like a student opening a new Terminal window.
           sh_bin="${SHELL:-/bin/zsh}"
           env -i HOME="$HOME" USER="$USER" LOGNAME="$USER" SHELL="$sh_bin" TERM=xterm-256color \
             "$sh_bin" -l -i -c 'for t in python3 node npm git gh supabase vercel claude; do printf "%-9s %s\n" "$t" "$($t --version 2>&1 | head -n 1)"; done' 2>/dev/null | tee fresh.txt
+          bad=0
+          for t in node npm git gh supabase vercel claude; do
+            grep -Eq "^$t +.*[0-9]+\.[0-9]+" fresh.txt || { echo "::error::$t does not work in a new window"; bad=1; }
+          done
           py=$(awk '$1=="python3" {print $3}' fresh.txt)
-          printf '%s\n%s\n' "3.14.0" "$py" | sort -t. -k1,1n -k2,2n -k3,3n -C || { echo "::error::python3 in a new window is '$py', expected 3.14 or newer"; exit 1; }
-          grep -E '^claude +[0-9]+\.[0-9]+' fresh.txt >/dev/null || { echo "::error::claude does not work in a new window"; exit 1; }
+          printf '%s\n%s\n' "3.14.0" "$py" | sort -t. -k1,1n -k2,2n -k3,3n -C || { echo "::error::python3 in a new window is '$py', expected 3.14 or newer"; bad=1; }
+          exit $bad
 
       - name: Collect logs
         if: always()
