@@ -69,6 +69,8 @@ macOS: use `python3 --version` for the first line.
 - **Use a phone hotspot,** not venue Wi-Fi. 30 laptops downloading at once kills venue Wi-Fi. Switch back once the table is green.
 - **Silent for >10 min = stuck** → Ctrl+C, re-run. Under 3 min = it's just downloading, wait.
 - **Mac, first run:** an Xcode installer may pop up (5–15 min) and Homebrew asks for the Mac password once — both normal. The cursor won't move while typing the password.
+- **Intel Macs, or Macs on macOS 13–14:** the script skips Homebrew (it no longer has ready-made packages for them) and downloads each tool directly from its official site — it says so near the top. It asks for the Mac password once, to install Python. Normal; takes about 5–10 min.
+- **Macs older than macOS 13.5:** the script stops at the start with a plain message. A free Software Update fixes it if one is offered; if not, that laptop is too old for the workshop tools.
 - Scripts are **safe to re-run** anytime.
 
 </details>
@@ -85,6 +87,7 @@ macOS: use `python3 --version` for the first line.
 | Red `node`: "Still v20…" (or another old version) | An older Node is in the way. Windows: Settings → Apps → uninstall **Node.js**, then re-run. Mac: ask the lead assistant. |
 | Mac: red `git` — "doesn't run" | Apple's developer tools broke (common after a macOS update). Run `xcode-select --install`, let it finish, re-run. |
 | Red `claude` / `supabase` / `vercel` | Fresh window, re-run. |
+| Mac: "This Mac runs macOS … need macOS 13.5 or newer" | System Settings → General → Software Update, install what's offered, re-run. If nothing newer is offered, the laptop is too old — borrow one. |
 | Mac: blocked / "unidentified developer" | Use the one-line method above — it never gets blocked. |
 | Mac: "no formula python@3.14" | `brew update`, then re-run. |
 | Windows: no admin popup | Their account isn't an admin — needs IT. |
@@ -139,6 +142,8 @@ echo "Done - close this window and open a fresh one."
 <br>
 
 **Check only, no install:** macOS — add `-- --diagnose-only` to the end of the one-liner. Windows — `-DiagnoseOnly`. (Skip Claude Code: `--skip-claude-code` / `-SkipClaudeCode`.)
+
+**Mac, never use Homebrew:** add `-- --no-homebrew` to the end of the one-liner — every missing tool is downloaded directly from its official site instead. This already happens automatically on Intel Macs and macOS 13–14.
 
 **Mac, prefer double-click:** double-click `script/run-fixer.command`. First time macOS blocks it → **System Settings → Privacy & Security →** scroll down → **Open Anyway** (Monterey: **System Preferences → Security & Privacy → General**). Once per Mac.
 
@@ -207,7 +212,7 @@ Sign in with the commands under **Done = all green** above.
 
 <br>
 
-**Automatic (no Windows device needed):** every change to the scripts is run for real on GitHub's free cloud computers — Windows Server 2025, Windows 11 (ARM), and Macs on macOS 15 and 26. It also runs every Monday, to catch outside changes (like a new Python or Node release) early. The badge at the top of this page shows the latest result; a green tick means every tool installed and worked in a fresh window. To run it on demand: **Actions** tab → **Test setup scripts** → **Run workflow**.
+**Automatic (no Windows device needed):** every change to the scripts is run for real on GitHub's free cloud computers — Windows Server 2025, Windows 11 (ARM), Apple-chip Macs on macOS 15 and 26 (the Homebrew route), plus an Intel Mac and a macOS 14 Mac with their tools removed first (the older-Mac direct-download route). It also runs every Monday, to catch outside changes (like a new Python or Node release) early. The badge at the top of this page shows the latest result; a green tick means every tool installed and worked in a fresh window. To run it on demand: **Actions** tab → **Test setup scripts** → **Run workflow**.
 
 **By hand:** run [docs/MANUAL-VM-TEST.md](docs/MANUAL-VM-TEST.md) on a clean VM (~30 min — has caught real bugs). Found a bug? [Open an issue](https://github.com/bigai-dev/vc-installation-script/issues) with the log, a screenshot of the final table, and the OS version.
 
