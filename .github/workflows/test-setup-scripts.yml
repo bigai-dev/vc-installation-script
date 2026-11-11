@@ -151,14 +151,18 @@ jobs:
           # Older Macs: each tool's official download instead of Homebrew.
           # Their pre-installed tools are removed first, so every download,
           # fingerprint check and install step really runs.
-          - os: macos-14          # Apple chip on macOS 14 (older than Homebrew supports)
+          # GitHub no longer offers macOS 14 machines, so the Apple-chip
+          # direct route is forced with --no-homebrew on macOS 15 instead.
+          - os: macos-15
             route: direct downloads
             fresh: true
-          - os: macos-15-intel    # Intel Mac
+            flags: --no-homebrew
+          - os: macos-15-intel    # Intel Mac: picks the direct route by itself
             route: direct downloads
             fresh: true
     env:
       FRESH: ${{ matrix.fresh }}
+      FLAGS: ${{ matrix.flags }}
     steps:
       - uses: actions/checkout@v7
 
@@ -189,9 +193,9 @@ jobs:
           if [ "$FRESH" = "true" ]; then
             # Clean environment, like a brand-new Terminal on a student's Mac.
             env -i HOME="$HOME" USER="$USER" LOGNAME="$USER" SHELL="$SHELL" TERM=dumb \
-              PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin /bin/bash script/fix-vibecode-mac.sh --diagnose-only
+              PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin /bin/bash script/fix-vibecode-mac.sh $FLAGS --diagnose-only
           else
-            /bin/bash script/fix-vibecode-mac.sh --diagnose-only
+            /bin/bash script/fix-vibecode-mac.sh $FLAGS --diagnose-only
           fi
 
       - name: Full run
@@ -199,9 +203,9 @@ jobs:
         run: |
           if [ "$FRESH" = "true" ]; then
             env -i HOME="$HOME" USER="$USER" LOGNAME="$USER" SHELL="$SHELL" TERM=dumb \
-              PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin /bin/bash script/fix-vibecode-mac.sh
+              PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin /bin/bash script/fix-vibecode-mac.sh $FLAGS
           else
-            /bin/bash script/fix-vibecode-mac.sh
+            /bin/bash script/fix-vibecode-mac.sh $FLAGS
           fi
 
       - name: Every tool is OK in the final table

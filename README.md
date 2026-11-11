@@ -212,7 +212,7 @@ Sign in with the commands under **Done = all green** above.
 
 <br>
 
-**Automatic (no Windows device needed):** every change to the scripts is run for real on GitHub's free cloud computers — Windows Server 2025, Windows 11 (ARM), Apple-chip Macs on macOS 15 and 26 (the Homebrew route), plus an Intel Mac and a macOS 14 Mac with their tools removed first (the older-Mac direct-download route). It also runs every Monday, to catch outside changes (like a new Python or Node release) early. The badge at the top of this page shows the latest result; a green tick means every tool installed and worked in a fresh window. To run it on demand: **Actions** tab → **Test setup scripts** → **Run workflow**.
+**Automatic (no Windows device needed):** every change to the scripts is run for real on GitHub's free cloud computers — Windows Server 2025, Windows 11 (ARM), Apple-chip Macs on macOS 15 and 26 (the Homebrew route), plus an Intel Mac and an Apple-chip Mac on the older-Mac direct-download route, with their tools removed first. It also runs every Monday, to catch outside changes (like a new Python or Node release) early. The badge at the top of this page shows the latest result; a green tick means every tool installed and worked in a fresh window. To run it on demand: **Actions** tab → **Test setup scripts** → **Run workflow**.
 
 **By hand:** run [docs/MANUAL-VM-TEST.md](docs/MANUAL-VM-TEST.md) on a clean VM (~30 min — has caught real bugs). Found a bug? [Open an issue](https://github.com/bigai-dev/vc-installation-script/issues) with the log, a screenshot of the final table, and the OS version.
 
