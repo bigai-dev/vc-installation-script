@@ -147,7 +147,9 @@ function Show-ToolOutput([string]$Exe) {
         if (Test-Path $sibling) { $run = $sibling }
     }
     try {
-        $out = @(& $run --version 2>&1 | ForEach-Object { "$_" } | Where-Object { $_.Trim() })
+        # (Windows PowerShell turns each blank error line into "...RemoteException")
+        $out = @(& $run --version 2>&1 | ForEach-Object { "$_" } |
+            Where-Object { $_.Trim() -and $_ -ne 'System.Management.Automation.RemoteException' })
     } catch {
         $out = @("$($_.Exception.Message)")
     }
