@@ -42,9 +42,9 @@ jobs:
         # no-node:       a laptop without Node.js - the fixer installs it
         # old-node:      like the student PC that failed in Nov 2026 - an old
         #                Node.js and an old Claude Code from npm already there
-        # lost-download: npm skips Supabase's and Vercel's program files, like
-        #                a download that drops on busy Wi-Fi - the fixer must
-        #                notice and repair both by itself
+        # lost-download: Supabase's and Vercel's program files never arrive,
+        #                like a download that drops on busy Wi-Fi - the fixer
+        #                must notice and repair both by itself
         case: [no-node]
         include:
           - os: windows-2025
@@ -170,7 +170,9 @@ jobs:
         run: |
           set npm_config_prefix=
           set npm_config_cache=
-          if "${{ matrix.case }}"=="lost-download" set "npm_config_omit=optional"
+          rem lost-download: npm fetches the program files for Linux instead, so
+          rem the Windows ones never arrive (npm ignores --omit=optional for -g).
+          if "${{ matrix.case }}"=="lost-download" set "npm_config_os=linux"
           call script\run-fixer.bat < nul
 
       - name: Every tool is OK in the final table
@@ -198,11 +200,11 @@ jobs:
         if: matrix.case == 'lost-download'
         shell: powershell
         run: |
-          # The full run skipped npm's "optional" packages, so Supabase and
-          # Vercel installed without the program file they need (what a dropped
-          # download or antivirus leaves behind). Vercel's starter fetches its
-          # file by itself; Supabase's can't, so the fixer must notice and get
-          # Supabase's own download instead.
+          # In the full run npm fetched the Linux program files, so Supabase
+          # and Vercel installed without the Windows file they need (what a
+          # dropped download or antivirus leaves behind). Vercel's starter
+          # fetches its file by itself; Supabase's can't, so the fixer must
+          # notice and get Supabase's own download instead.
           $ErrorActionPreference = 'Continue'
           $log = Get-ChildItem "$env:TEMP\fix-vibecode-2*.log" | Sort-Object LastWriteTime | Select-Object -Last 1
           $text = Get-Content $log.FullName -Raw
