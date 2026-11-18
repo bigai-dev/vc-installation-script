@@ -67,6 +67,7 @@ jobs:
 
       - name: Make this cloud machine look like a student laptop
         shell: powershell
+        timeout-minutes: 15
         run: |
           # The cloud machine has an extra Python on its system PATH that a
           # student laptop wouldn't have. Hide it so the fixer has to install
@@ -137,9 +138,15 @@ jobs:
             # node in Program Files, npm tools in %APPDATA%\npm on the user's
             # PATH) and Claude Code installed with npm months ago.
             $ErrorActionPreference = 'Continue'
-            $v20 = (Invoke-RestMethod https://nodejs.org/dist/index.json | Where-Object { $_.version -like 'v20.*' } | Select-Object -First 1).version
+            $ProgressPreference = 'SilentlyContinue'   # downloads crawl with the progress bar on
+            # Saved first: Windows PowerShell passes a downloaded list down the
+            # pipeline as one item, so filtering it directly matches everything.
+            $index = Invoke-RestMethod https://nodejs.org/dist/index.json
+            $v20 = ($index | Where-Object { $_.version -like 'v20.*' } | Select-Object -First 1).version
+            if ("$v20" -notmatch '^v20\.\d+\.\d+$') { Write-Host "::error::Could not find the latest Node.js 20 release ('$v20')"; exit 1 }
             $msi = Join-Path $env:RUNNER_TEMP "node-$v20-x64.msi"
             Invoke-WebRequest "https://nodejs.org/dist/$v20/node-$v20-x64.msi" -OutFile $msi -UseBasicParsing
+            if (-not (Test-Path $msi)) { Write-Host "::error::Could not download Node.js $v20"; exit 1 }
             $proc = Start-Process msiexec.exe -ArgumentList "/i `"$msi`" /qn /norestart" -Wait -PassThru
             Write-Host "Installed Node.js $v20 (exit code $($proc.ExitCode))"
             $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')
