@@ -35,8 +35,10 @@ jobs:
       fail-fast: false
       matrix:
         # windows-2025:   Windows on an Intel/AMD chip (like most student laptops)
+        # windows-2022:   built on the same core as Windows 10 (GitHub has no
+        #                 Windows 10 machines; this is the closest it offers)
         # windows-11-arm: Windows 11 on an ARM chip (like Snapdragon laptops)
-        os: [windows-2025, windows-11-arm]
+        os: [windows-2025, windows-2022, windows-11-arm]
     steps:
       - uses: actions/checkout@v7
 
@@ -120,6 +122,59 @@ jobs:
             $bad++
           }
           if ($bad) { exit 1 }
+
+      - name: Supabase login stays out of the Windows password vault
+        shell: powershell
+        timeout-minutes: 5
+        run: |
+          # Avast/AVG removed Windows files (Version.dll) on student PCs around
+          # "supabase login". Supabase CLI v3 saves the login in the Windows
+          # password vault through a helper it unpacks into TEMP, which looks
+          # like password theft. The fixer turns on Supabase's own switch
+          # (SUPABASE_NO_KEYRING=1) so the login goes to a file instead.
+          # Logs in twice with a made-up token in Supabase's format (not a real
+          # login): with the fixer's setting, then without it for comparison.
+          $ErrorActionPreference = 'Continue'
+          $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')
+          $setting = [Environment]::GetEnvironmentVariable('SUPABASE_NO_KEYRING', 'User')
+          Write-Host "A new window gets SUPABASE_NO_KEYRING='$setting'"
+          $token = 'sbp_' + ('0123456789abcdef' * 3).Substring(0, 40)
+          $tokenFile = Join-Path $env:USERPROFILE '.supabase\access-token'
+
+          function Test-SupabaseLogin([string]$label) {
+            Remove-Item $tokenFile -Force -ErrorAction SilentlyContinue
+            $helpersBefore = @(Get-ChildItem $env:TEMP -Recurse -Force -Filter *.node -ErrorAction SilentlyContinue | ForEach-Object FullName)
+            $vaultBefore = @(cmdkey /list | Select-String -Pattern 'supabase' | ForEach-Object { $_.Line.Trim() })
+            $out = @(& supabase login --token $token 2>&1 | ForEach-Object { "$_" })
+            $code = $LASTEXITCODE
+            $helpers = @(Get-ChildItem $env:TEMP -Recurse -Force -Filter *.node -ErrorAction SilentlyContinue | ForEach-Object FullName | Where-Object { $helpersBefore -notcontains $_ })
+            $vault = @(cmdkey /list | Select-String -Pattern 'supabase' | ForEach-Object { $_.Line.Trim() } | Where-Object { $vaultBefore -notcontains $_ })
+            $file = (Test-Path $tokenFile) -and ("$(Get-Content $tokenFile -Raw)".Trim() -eq $token)
+            Write-Host ""
+            Write-Host "== $label"
+            $out | ForEach-Object { Write-Host "   supabase says: $_" }
+            Write-Host "   exit code:                 $code"
+            Write-Host "   helper unpacked into TEMP: $(if ($helpers.Count) { $helpers -join ', ' } else { 'no' })"
+            Write-Host "   new password-vault entry:  $(if ($vault.Count) { $vault -join ', ' } else { 'no' })"
+            Write-Host "   login saved in a file:     $(if ($file) { $tokenFile } else { 'no' })"
+            [pscustomobject]@{ Code = $code; Helpers = $helpers.Count; Vault = $vault.Count; File = $file }
+          }
+
+          $env:SUPABASE_NO_KEYRING = $setting
+          $with = Test-SupabaseLogin 'WITH the fixer setting (what students get now)'
+          Remove-Item Env:SUPABASE_NO_KEYRING -ErrorAction SilentlyContinue
+          $without = Test-SupabaseLogin 'WITHOUT the setting (Supabase default, for comparison)'
+
+          $bad = 0
+          if ($setting -ne '1') { Write-Host "::error::The fixer did not turn on SUPABASE_NO_KEYRING for new windows"; $bad++ }
+          if ($with.Code -ne 0) { Write-Host "::error::supabase login failed with the setting on"; $bad++ }
+          if (-not $with.File) { Write-Host "::error::With the setting on, the login was not saved in $tokenFile"; $bad++ }
+          if ($with.Vault) { Write-Host "::error::With the setting on, Supabase still wrote to the Windows password vault"; $bad++ }
+          if ($with.Helpers) { Write-Host "::error::With the setting on, Supabase still unpacked its password-vault helper"; $bad++ }
+          if (-not $without.Vault -and -not $without.Helpers) {
+            Write-Host "::warning::Even without the setting, no vault entry or helper showed up here, so this machine cannot show the difference"
+          }
+          exit $bad
 
       - name: Collect logs
         if: always()
