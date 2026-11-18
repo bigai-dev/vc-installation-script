@@ -28,7 +28,7 @@ concurrency:
 
 jobs:
   windows:
-    name: Windows (${{ matrix.os }})
+    name: Windows (${{ matrix.os }}, ${{ matrix.case }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     strategy:
@@ -39,6 +39,18 @@ jobs:
         #                 Windows 10 machines; this is the closest it offers)
         # windows-11-arm: Windows 11 on an ARM chip (like Snapdragon laptops)
         os: [windows-2025, windows-2022, windows-11-arm]
+        # no-node:       a laptop without Node.js - the fixer installs it
+        # old-node:      like the student PC that failed in Nov 2026 - an old
+        #                Node.js and an old Claude Code from npm already there
+        # lost-download: Supabase's and Vercel's program files never arrive,
+        #                like a download that drops on busy Wi-Fi - the fixer
+        #                must notice and repair both by itself
+        case: [no-node]
+        include:
+          - os: windows-2025
+            case: old-node
+          - os: windows-2025
+            case: lost-download
     steps:
       - uses: actions/checkout@v7
 
@@ -55,6 +67,7 @@ jobs:
 
       - name: Make this cloud machine look like a student laptop
         shell: powershell
+        timeout-minutes: 15
         run: |
           # The cloud machine has an extra Python on its system PATH that a
           # student laptop wouldn't have. Hide it so the fixer has to install
@@ -90,6 +103,58 @@ jobs:
           $left = Get-ItemProperty 'HKLM:\SOFTWARE\Python\PythonCore\3.14*\InstallPath' -ErrorAction SilentlyContinue
           if ($left) { Write-Host "::warning::Python 3.14 is still registered at $($left.'(default)')" }
 
+          # Cloud machines also come with Node.js already installed, and with
+          # npm set up to put tools in C:\npm\prefix. A student laptop has no
+          # Node.js (or an old one), and npm puts tools in %APPDATA%\npm.
+          # Remove all of that so the fixer has to install Node itself.
+          Write-Host "This step was started with npm_config_prefix='$env:npm_config_prefix'"
+          Remove-Item Env:npm_config_prefix, Env:npm_config_cache -ErrorAction SilentlyContinue
+          $nodeParts = @(Get-ItemProperty $uninstallKeys -ErrorAction SilentlyContinue |
+            Where-Object { $_.DisplayName -match '^Node\.js' -and $_.PSChildName -match '^\{[0-9A-Fa-f-]{36}\}$' })
+          foreach ($p in $nodeParts) {
+            Write-Host "Removing pre-installed $($p.DisplayName) $($p.DisplayVersion)..."
+            $proc = Start-Process msiexec.exe -ArgumentList "/x $($p.PSChildName) /qn /norestart" -Wait -PassThru
+            Write-Host "  finished (exit code $($proc.ExitCode))"
+          }
+          Remove-Item "$env:ProgramFiles\nodejs", 'C:\npm', "$env:APPDATA\npm", "$env:APPDATA\npm-cache", "$env:LOCALAPPDATA\npm-cache", "$env:USERPROFILE\.npmrc" -Recurse -Force -ErrorAction SilentlyContinue
+          foreach ($scope in 'Machine', 'User') {
+            foreach ($name in 'npm_config_prefix', 'npm_config_cache') {
+              if ([Environment]::GetEnvironmentVariable($name, $scope)) {
+                Write-Host "Removing the cloud machine's $name setting ($scope)"
+                [Environment]::SetEnvironmentVariable($name, $null, $scope)
+              }
+            }
+            $old = [Environment]::GetEnvironmentVariable('Path', $scope)
+            if (-not $old) { continue }
+            $new = ($old -split ';' | Where-Object { $_ -and $_ -notmatch '^C:\\npm\\' -and $_ -notmatch '\\nodejs\\?$' -and $_ -notmatch '\\AppData\\Roaming\\npm\\?$' }) -join ';'
+            [Environment]::SetEnvironmentVariable('Path', $new, $scope)
+          }
+          $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')
+          $left = @(Get-Command node -All -ErrorAction SilentlyContinue | ForEach-Object Source)
+          if ($left) { Write-Host "::warning::node is still on PATH: $($left -join ', ')" } else { Write-Host "Pre-installed Node.js removed." }
+
+          if ('${{ matrix.case }}' -eq 'old-node') {
+            # Node.js 20 from nodejs.org (what the Node MSI installer sets up:
+            # node in Program Files, npm tools in %APPDATA%\npm on the user's
+            # PATH) and Claude Code installed with npm months ago.
+            $ErrorActionPreference = 'Continue'
+            $ProgressPreference = 'SilentlyContinue'   # downloads crawl with the progress bar on
+            # Saved first: Windows PowerShell passes a downloaded list down the
+            # pipeline as one item, so filtering it directly matches everything.
+            $index = Invoke-RestMethod https://nodejs.org/dist/index.json
+            $v20 = ($index | Where-Object { $_.version -like 'v20.*' } | Select-Object -First 1).version
+            if ("$v20" -notmatch '^v20\.\d+\.\d+$') { Write-Host "::error::Could not find the latest Node.js 20 release ('$v20')"; exit 1 }
+            $msi = Join-Path $env:RUNNER_TEMP "node-$v20-x64.msi"
+            Invoke-WebRequest "https://nodejs.org/dist/$v20/node-$v20-x64.msi" -OutFile $msi -UseBasicParsing
+            if (-not (Test-Path $msi)) { Write-Host "::error::Could not download Node.js $v20"; exit 1 }
+            $proc = Start-Process msiexec.exe -ArgumentList "/i `"$msi`" /qn /norestart" -Wait -PassThru
+            Write-Host "Installed Node.js $v20 (exit code $($proc.ExitCode))"
+            $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')
+            & "$env:ProgramFiles\nodejs\npm.cmd" install -g '@anthropic-ai/claude-code@2.1.181'
+            Write-Host "npm puts tools in: $(& "$env:ProgramFiles\nodejs\npm.cmd" prefix -g)"
+            Write-Host "User PATH: $([Environment]::GetEnvironmentVariable('Path', 'User'))"
+          }
+
       - name: Check-only run (-DiagnoseOnly)
         shell: powershell
         run: |
@@ -99,8 +164,16 @@ jobs:
       - name: Full run through run-fixer.bat (the file students double-click)
         shell: cmd
         timeout-minutes: 45
-        # "< nul" answers the two "press any key" pauses automatically.
-        run: call script\run-fixer.bat < nul
+        # "< nul" answers the two "press any key" pauses automatically. The
+        # cloud machine's own npm settings, which this step still inherits,
+        # are cleared first: a student's PC doesn't have them.
+        run: |
+          set npm_config_prefix=
+          set npm_config_cache=
+          rem lost-download: npm fetches the program files for Linux instead, so
+          rem the Windows ones never arrive (npm ignores --omit=optional for -g).
+          if "${{ matrix.case }}"=="lost-download" set "npm_config_os=linux"
+          call script\run-fixer.bat < nul
 
       - name: Every tool is OK in the final table
         shell: powershell
@@ -122,6 +195,27 @@ jobs:
             Write-Host "::error::The fixer did not finish with 'All tools are working'"
             exit 1
           }
+
+      - name: The fixer repaired Supabase when its program file didn't arrive
+        if: matrix.case == 'lost-download'
+        shell: powershell
+        run: |
+          # In the full run npm fetched the Linux program files, so Supabase
+          # and Vercel installed without the Windows file they need (what a
+          # dropped download or antivirus leaves behind). Vercel's starter
+          # fetches its file by itself; Supabase's can't, so the fixer must
+          # notice and get Supabase's own download instead.
+          $ErrorActionPreference = 'Continue'
+          $log = Get-ChildItem "$env:TEMP\fix-vibecode-2*.log" | Sort-Object LastWriteTime | Select-Object -Last 1
+          $text = Get-Content $log.FullName -Raw
+          $bad = 0
+          if ($text -notmatch "npm says supabase is installed, but 'supabase' doesn't run") { Write-Host "::error::The fixer did not notice that Supabase didn't run"; $bad++ }
+          if ($text -notmatch 'Downloading Supabase CLI straight from Supabase') { Write-Host "::error::The fixer did not fall back to Supabase's own download"; $bad++ }
+          $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')
+          $sb = Get-Command supabase -ErrorAction SilentlyContinue
+          Write-Host "A new window finds supabase at: $($sb.Source)"
+          if ($sb.Source -ne "$env:LOCALAPPDATA\Programs\Supabase\supabase.exe") { Write-Host "::error::supabase should now come from Supabase's own download"; $bad++ }
+          exit $bad
 
       - name: Tools work in a brand-new window
         shell: powershell
@@ -250,7 +344,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: logs-${{ matrix.os }}
+          name: logs-${{ matrix.os }}-${{ matrix.case }}
           path: logs/
           if-no-files-found: ignore
 

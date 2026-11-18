@@ -87,6 +87,7 @@ macOS: use `python3 --version` for the first line.
 | Red `node`: "Still v20…" (or another old version) | An older Node is in the way. Windows: Settings → Apps → uninstall **Node.js**, then re-run. Mac: ask the lead assistant. |
 | Mac: red `git` — "doesn't run" | Apple's developer tools broke (common after a macOS update). Run `xcode-select --install`, let it finish, re-run. |
 | Red `claude` / `supabase` / `vercel` | Fresh window, re-run. |
+| Windows: red `supabase` / `vercel` — "Doesn't run after installing" | The script already retried by itself (and for Supabase also tried Supabase's own download, the file `scoop install supabase` uses — no need to run that by hand). Usually the big download (~150 MB each) dropped on busy Wi-Fi, or antivirus removed it: re-run on a steadier connection. If Avast/AVG shows a quarantined `supabase.exe` or `vercel.exe`, restore it first. The log shows what the tool printed. |
 | Mac: "This Mac runs macOS … need macOS 13.5 or newer" | System Settings → General → Software Update, install what's offered, re-run. If nothing newer is offered, the laptop is too old — borrow one. |
 | Mac: blocked / "unidentified developer" | Use the one-line method above — it never gets blocked. |
 | Mac: "no formula python@3.14" | `brew update`, then re-run. |
