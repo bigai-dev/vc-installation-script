@@ -819,7 +819,7 @@ function Install-SupabaseDirect {
             Fail "Supabase's download doesn't match the checksum Supabase published - not installing it."
             return $false
         }
-        & $tar -xzf $archive -C $work
+        & $tar -xzf $archive -C $work | Out-Host
         $exe = Get-ChildItem $work -Recurse -Filter 'supabase.exe' | Select-Object -First 1
         if (-not $exe) {
             Fail "Supabase's download didn't contain supabase.exe."
