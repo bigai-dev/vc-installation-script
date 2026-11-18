@@ -149,6 +149,44 @@ jobs:
           }
           if ($bad) { exit 1 }
 
+      - name: Tools work for Claude Code (it runs commands through Git Bash)
+        shell: powershell
+        timeout-minutes: 5
+        run: |
+          # On Windows, Claude Code runs every command through Git Bash, not
+          # PowerShell. Start from a brand-new window's PATH, find Git Bash the
+          # way Claude Code does (next to git), and run each tool through it.
+          $ErrorActionPreference = 'Continue'
+          $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')
+          $git = Get-Command git -ErrorAction SilentlyContinue
+          if (-not $git) { Write-Host "::error::git is not on PATH, so Claude Code cannot find Git Bash"; exit 1 }
+          $bash = Join-Path (Split-Path (Split-Path $git.Source -Parent) -Parent) 'bin\bash.exe'
+          if (-not (Test-Path $bash)) { Write-Host "::error::Git Bash not found at $bash (next to $($git.Source))"; exit 1 }
+          Write-Host "Claude Code would use Git Bash at: $bash"
+          $check = Join-Path $env:RUNNER_TEMP 'claude-code-tools.sh'
+          $lines = @(
+            'for t in python node npm git gh supabase vercel claude; do',
+            '  printf "%-9s %s   [%s]\n" "$t" "$("$t" --version 2>&1 | head -n 1)" "$(command -v "$t")"',
+            'done'
+          )
+          [IO.File]::WriteAllText($check, ($lines -join "`n") + "`n")
+          $out = @(& $bash -l ($check -replace '\\', '/') 2>&1 | ForEach-Object { "$_" })
+          $out | ForEach-Object { Write-Host $_ }
+          # Judge only what each tool printed, not the [folder] it was found in.
+          $bad = 0
+          $versions = @{}
+          foreach ($t in 'python', 'node', 'npm', 'git', 'gh', 'supabase', 'vercel', 'claude') {
+            $line = "$($out | Where-Object { $_ -match "^$t\s" } | Select-Object -First 1)"
+            $versions[$t] = ($line -replace '^\S+\s+', '') -replace '\s+\[[^\]]*\]\s*$', ''
+            if ($versions[$t] -notmatch '\d+\.\d+') { Write-Host "::error::$t does not work in Git Bash, so Claude Code can't use it"; $bad++ }
+          }
+          $py = ($versions['python'] -replace '^Python\s+', '') -replace '\s.*$', ''
+          if ($py -notmatch '^\d+\.\d+' -or [version]($py -replace '[^\d.].*$', '') -lt [version]'3.14') {
+            Write-Host "::error::python in Git Bash is '$py', expected 3.14 or newer"
+            $bad++
+          }
+          exit $bad
+
       - name: Supabase login stays out of the Windows password vault
         shell: powershell
         timeout-minutes: 5
