@@ -35,8 +35,10 @@ jobs:
       fail-fast: false
       matrix:
         # windows-2025:   Windows on an Intel/AMD chip (like most student laptops)
+        # windows-2022:   built on the same core as Windows 10 (GitHub has no
+        #                 Windows 10 machines; this is the closest it offers)
         # windows-11-arm: Windows 11 on an ARM chip (like Snapdragon laptops)
-        os: [windows-2025, windows-11-arm]
+        os: [windows-2025, windows-2022, windows-11-arm]
     steps:
       - uses: actions/checkout@v7
 
@@ -64,6 +66,29 @@ jobs:
             [Environment]::SetEnvironmentVariable('Path', $new, $scope)
           }
           Write-Host "Pre-installed Python hidden from PATH."
+          # Some cloud machines (Windows Server 2022) also have the very same
+          # Python 3.14 pre-installed. Python's installer then quietly reuses
+          # that hidden copy instead of installing fresh, which a student
+          # laptop wouldn't do - so uninstall it first. Its parts are
+          # registered machine-wide as separate MSI packages ("Python 3.14.x
+          # Core Interpreter (64-bit)" and so on); the bundle entry that would
+          # uninstall them all at once belongs to the user who built the image.
+          $uninstallKeys = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
+                           'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*'
+          $parts = @(Get-ItemProperty $uninstallKeys -ErrorAction SilentlyContinue |
+            Where-Object { $_.DisplayName -match '^Python 3\.14\.\d+ ' -and $_.PSChildName -match '^\{[0-9A-Fa-f-]{36}\}$' })
+          foreach ($p in $parts) {
+            Write-Host "Removing pre-installed $($p.DisplayName)..."
+            try {
+              $proc = Start-Process msiexec.exe -ArgumentList "/x $($p.PSChildName) /qn /norestart" -Wait -PassThru
+              Write-Host "  finished (exit code $($proc.ExitCode))"
+            } catch {
+              Write-Host "::warning::Could not remove $($p.DisplayName): $($_.Exception.Message)"
+            }
+          }
+          if (-not $parts) { Write-Host "No pre-installed Python 3.14 to remove." }
+          $left = Get-ItemProperty 'HKLM:\SOFTWARE\Python\PythonCore\3.14*\InstallPath' -ErrorAction SilentlyContinue
+          if ($left) { Write-Host "::warning::Python 3.14 is still registered at $($left.'(default)')" }
 
       - name: Check-only run (-DiagnoseOnly)
         shell: powershell
@@ -85,12 +110,15 @@ jobs:
           $lines = @(Get-Content $log.FullName)
           $hit = $lines | Select-String -Pattern 'Tool\s+Status\s+Version' | Select-Object -Last 1
           if ($hit) { $lines[($hit.LineNumber - 1)..($lines.Count - 1)] | ForEach-Object { Write-Host $_ } }
-          $failed = @($lines | Select-String -Pattern '^\s{2}\S+\s+Failed\s')
+          # A failed row can end right after "Failed" (no version or path), and
+          # "Next steps once all tools are working" must not count as success,
+          # so match the table status and the exact success sentence.
+          $failed = @($lines | Select-String -CaseSensitive -Pattern '^\s{2}\S+\s+Failed(\s|$)')
           if ($failed.Count -gt 0) {
             $failed | ForEach-Object { Write-Host "::error::$($_.Line.Trim())" }
             exit 1
           }
-          if (-not ($lines | Select-String -SimpleMatch 'All tools are working')) {
+          if (-not ($lines | Select-String -CaseSensitive -SimpleMatch 'All tools are working in THIS PowerShell window')) {
             Write-Host "::error::The fixer did not finish with 'All tools are working'"
             exit 1
           }
@@ -120,6 +148,59 @@ jobs:
             $bad++
           }
           if ($bad) { exit 1 }
+
+      - name: Supabase login stays out of the Windows password vault
+        shell: powershell
+        timeout-minutes: 5
+        run: |
+          # Avast/AVG removed Windows files (Version.dll) on student PCs around
+          # "supabase login". Supabase CLI v3 saves the login in the Windows
+          # password vault through a helper it unpacks into TEMP, which looks
+          # like password theft. The fixer turns on Supabase's own switch
+          # (SUPABASE_NO_KEYRING=1) so the login goes to a file instead.
+          # Logs in twice with a made-up token in Supabase's format (not a real
+          # login): with the fixer's setting, then without it for comparison.
+          $ErrorActionPreference = 'Continue'
+          $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')
+          $setting = [Environment]::GetEnvironmentVariable('SUPABASE_NO_KEYRING', 'User')
+          Write-Host "A new window gets SUPABASE_NO_KEYRING='$setting'"
+          $token = 'sbp_' + ('0123456789abcdef' * 3).Substring(0, 40)
+          $tokenFile = Join-Path $env:USERPROFILE '.supabase\access-token'
+
+          function Test-SupabaseLogin([string]$label) {
+            Remove-Item $tokenFile -Force -ErrorAction SilentlyContinue
+            $helpersBefore = @(Get-ChildItem $env:TEMP -Recurse -Force -Filter *.node -ErrorAction SilentlyContinue | ForEach-Object FullName)
+            $vaultBefore = @(cmdkey /list | Select-String -Pattern 'supabase' | ForEach-Object { $_.Line.Trim() })
+            $out = @(& supabase login --token $token 2>&1 | ForEach-Object { "$_" })
+            $code = $LASTEXITCODE
+            $helpers = @(Get-ChildItem $env:TEMP -Recurse -Force -Filter *.node -ErrorAction SilentlyContinue | ForEach-Object FullName | Where-Object { $helpersBefore -notcontains $_ })
+            $vault = @(cmdkey /list | Select-String -Pattern 'supabase' | ForEach-Object { $_.Line.Trim() } | Where-Object { $vaultBefore -notcontains $_ })
+            $file = (Test-Path $tokenFile) -and ("$(Get-Content $tokenFile -Raw)".Trim() -eq $token)
+            Write-Host ""
+            Write-Host "== $label"
+            $out | ForEach-Object { Write-Host "   supabase says: $_" }
+            Write-Host "   exit code:                 $code"
+            Write-Host "   helper unpacked into TEMP: $(if ($helpers.Count) { $helpers -join ', ' } else { 'no' })"
+            Write-Host "   new password-vault entry:  $(if ($vault.Count) { $vault -join ', ' } else { 'no' })"
+            Write-Host "   login saved in a file:     $(if ($file) { $tokenFile } else { 'no' })"
+            [pscustomobject]@{ Code = $code; Helpers = $helpers.Count; Vault = $vault.Count; File = $file }
+          }
+
+          $env:SUPABASE_NO_KEYRING = $setting
+          $with = Test-SupabaseLogin 'WITH the fixer setting (what students get now)'
+          Remove-Item Env:SUPABASE_NO_KEYRING -ErrorAction SilentlyContinue
+          $without = Test-SupabaseLogin 'WITHOUT the setting (Supabase default, for comparison)'
+
+          $bad = 0
+          if ($setting -ne '1') { Write-Host "::error::The fixer did not turn on SUPABASE_NO_KEYRING for new windows"; $bad++ }
+          if ($with.Code -ne 0) { Write-Host "::error::supabase login failed with the setting on"; $bad++ }
+          if (-not $with.File) { Write-Host "::error::With the setting on, the login was not saved in $tokenFile"; $bad++ }
+          if ($with.Vault) { Write-Host "::error::With the setting on, Supabase still wrote to the Windows password vault"; $bad++ }
+          if ($with.Helpers) { Write-Host "::error::With the setting on, Supabase still unpacked its password-vault helper"; $bad++ }
+          if (-not $without.Vault -and -not $without.Helpers) {
+            Write-Host "::warning::Even without the setting, no vault entry or helper showed up here, so this machine cannot show the difference"
+          }
+          exit $bad
 
       - name: Collect logs
         if: always()

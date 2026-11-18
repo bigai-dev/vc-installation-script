@@ -761,6 +761,32 @@ function Install-SupabaseCLI {
     }
 }
 
+# Supabase CLI v3 (Nov 2026) keeps its login in the Windows password vault
+# (Credential Manager) through a helper it unpacks into the temp folder.
+# Avast/AVG treat that like password theft and have removed Windows files
+# (Version.dll) on student PCs, breaking Windows. SUPABASE_NO_KEYRING=1 is
+# Supabase's own switch: the login goes to %USERPROFILE%\.supabase\access-token
+# instead and the helper never loads. Set before Supabase runs at all.
+function Set-SupabaseLoginStorage {
+    if ([Environment]::GetEnvironmentVariable('SUPABASE_NO_KEYRING', 'User') -eq '1') {
+        $env:SUPABASE_NO_KEYRING = '1'
+        OK "Supabase login is saved in a file (antivirus-safe setting already on)"
+        return
+    }
+    if ($DiagnoseOnly) {
+        Warn "Supabase would save its login in the Windows password vault, which Avast/AVG can flag. Would switch it to a file (SUPABASE_NO_KEYRING=1)."
+        return
+    }
+    try {
+        [Environment]::SetEnvironmentVariable('SUPABASE_NO_KEYRING', '1', 'User')
+        $env:SUPABASE_NO_KEYRING = '1'
+        OK "Supabase login will be saved in a file, not the Windows password vault (SUPABASE_NO_KEYRING=1), so Avast/AVG don't flag it"
+    } catch {
+        Warn "Could not switch the Supabase login to a file: $($_.Exception.Message)"
+    }
+}
+
+Set-SupabaseLoginStorage
 Install-SupabaseCLI
 
 # ---------- Find and install Vercel CLI ----------
