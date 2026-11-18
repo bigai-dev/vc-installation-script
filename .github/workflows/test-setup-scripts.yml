@@ -69,25 +69,26 @@ jobs:
           # Some cloud machines (Windows Server 2022) also have the very same
           # Python 3.14 pre-installed. Python's installer then quietly reuses
           # that hidden copy instead of installing fresh, which a student
-          # laptop wouldn't do - so uninstall it properly first.
+          # laptop wouldn't do - so uninstall it first. Its parts are
+          # registered machine-wide as separate MSI packages ("Python 3.14.x
+          # Core Interpreter (64-bit)" and so on); the bundle entry that would
+          # uninstall them all at once belongs to the user who built the image.
           $uninstallKeys = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
                            'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*'
-          $preinstalled = @(Get-ItemProperty $uninstallKeys -ErrorAction SilentlyContinue |
-            Where-Object { $_.DisplayName -match '^Python 3\.14\.\d+ \(' -and $_.QuietUninstallString })
-          foreach ($p in $preinstalled) {
-            if ($p.QuietUninstallString -match '^"([^"]+)"\s*(.*)$') {
-              $exe = $Matches[1]
-              $uArgs = ($Matches[2] + ' /norestart').Trim()
-              Write-Host "Uninstalling pre-installed $($p.DisplayName)..."
-              try {
-                $proc = Start-Process -FilePath $exe -ArgumentList $uArgs -Wait -PassThru
-                Write-Host "  finished (exit code $($proc.ExitCode))"
-              } catch {
-                Write-Host "::warning::Could not uninstall $($p.DisplayName): $($_.Exception.Message)"
-              }
+          $parts = @(Get-ItemProperty $uninstallKeys -ErrorAction SilentlyContinue |
+            Where-Object { $_.DisplayName -match '^Python 3\.14\.\d+ ' -and $_.PSChildName -match '^\{[0-9A-Fa-f-]{36}\}$' })
+          foreach ($p in $parts) {
+            Write-Host "Removing pre-installed $($p.DisplayName)..."
+            try {
+              $proc = Start-Process msiexec.exe -ArgumentList "/x $($p.PSChildName) /qn /norestart" -Wait -PassThru
+              Write-Host "  finished (exit code $($proc.ExitCode))"
+            } catch {
+              Write-Host "::warning::Could not remove $($p.DisplayName): $($_.Exception.Message)"
             }
           }
-          if (-not $preinstalled) { Write-Host "No pre-installed Python 3.14 to remove." }
+          if (-not $parts) { Write-Host "No pre-installed Python 3.14 to remove." }
+          $left = Get-ItemProperty 'HKLM:\SOFTWARE\Python\PythonCore\3.14*\InstallPath' -ErrorAction SilentlyContinue
+          if ($left) { Write-Host "::warning::Python 3.14 is still registered at $($left.'(default)')" }
 
       - name: Check-only run (-DiagnoseOnly)
         shell: powershell
