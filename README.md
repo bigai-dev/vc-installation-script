@@ -91,6 +91,8 @@ macOS: use `python3 --version` for the first line.
 | Mac: blocked / "unidentified developer" | Use the one-line method above — it never gets blocked. |
 | Mac: "no formula python@3.14" | `brew update`, then re-run. |
 | Windows: no admin popup | Their account isn't an admin — needs IT. |
+| Windows: Avast/AVG flags a threat and removes **Version.dll** (Windows breaks) | Fixed in the script (Nov 2026) — Avast mistook the Supabase login for password theft. On a PC already hit: Avast → Menu → **Quarantine** → restore Version.dll (or use System Restore), then re-run the script **before** `supabase login`. |
+| Windows: Supabase says you're not logged in | Run `supabase login` once more — the login is now kept in a file (`%USERPROFILE%\.supabase\access-token`) instead of the Windows password store. |
 | Anything else | Close everything, open a fresh window, re-run. |
 
 **Logs:** Windows `%TEMP%\fix-vibecode-*.log` · macOS `/tmp/fix-vibecode-*.log`
@@ -212,7 +214,7 @@ Sign in with the commands under **Done = all green** above.
 
 <br>
 
-**Automatic (no Windows device needed):** every change to the scripts is run for real on GitHub's free cloud computers — Windows Server 2025, Windows 11 (ARM), Apple-chip Macs on macOS 15 and 26 (the Homebrew route), plus an Intel Mac and an Apple-chip Mac on the older-Mac direct-download route, with their tools removed first. It also runs every Monday, to catch outside changes (like a new Python or Node release) early. The badge at the top of this page shows the latest result; a green tick means every tool installed and worked in a fresh window. To run it on demand: **Actions** tab → **Test setup scripts** → **Run workflow**.
+**Automatic (no Windows device needed):** every change to the scripts is run for real on GitHub's free cloud computers — Windows Server 2025, Windows Server 2022 (built on the Windows 10 core; GitHub has no Windows 10 machines), Windows 11 (ARM), Apple-chip Macs on macOS 15 and 26 (the Homebrew route), plus an Intel Mac and an Apple-chip Mac on the older-Mac direct-download route, with their tools removed first. It also runs every Monday, to catch outside changes (like a new Python or Node release) early. The badge at the top of this page shows the latest result; a green tick means every tool installed and worked in a fresh window. To run it on demand: **Actions** tab → **Test setup scripts** → **Run workflow**.
 
 **By hand:** run [docs/MANUAL-VM-TEST.md](docs/MANUAL-VM-TEST.md) on a clean VM (~30 min — has caught real bugs). Found a bug? [Open an issue](https://github.com/bigai-dev/vc-installation-script/issues) with the log, a screenshot of the final table, and the OS version.
 
