@@ -66,6 +66,28 @@ jobs:
             [Environment]::SetEnvironmentVariable('Path', $new, $scope)
           }
           Write-Host "Pre-installed Python hidden from PATH."
+          # Some cloud machines (Windows Server 2022) also have the very same
+          # Python 3.14 pre-installed. Python's installer then quietly reuses
+          # that hidden copy instead of installing fresh, which a student
+          # laptop wouldn't do - so uninstall it properly first.
+          $uninstallKeys = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
+                           'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*'
+          $preinstalled = @(Get-ItemProperty $uninstallKeys -ErrorAction SilentlyContinue |
+            Where-Object { $_.DisplayName -match '^Python 3\.14\.\d+ \(' -and $_.QuietUninstallString })
+          foreach ($p in $preinstalled) {
+            if ($p.QuietUninstallString -match '^"([^"]+)"\s*(.*)$') {
+              $exe = $Matches[1]
+              $uArgs = ($Matches[2] + ' /norestart').Trim()
+              Write-Host "Uninstalling pre-installed $($p.DisplayName)..."
+              try {
+                $proc = Start-Process -FilePath $exe -ArgumentList $uArgs -Wait -PassThru
+                Write-Host "  finished (exit code $($proc.ExitCode))"
+              } catch {
+                Write-Host "::warning::Could not uninstall $($p.DisplayName): $($_.Exception.Message)"
+              }
+            }
+          }
+          if (-not $preinstalled) { Write-Host "No pre-installed Python 3.14 to remove." }
 
       - name: Check-only run (-DiagnoseOnly)
         shell: powershell
@@ -87,12 +109,15 @@ jobs:
           $lines = @(Get-Content $log.FullName)
           $hit = $lines | Select-String -Pattern 'Tool\s+Status\s+Version' | Select-Object -Last 1
           if ($hit) { $lines[($hit.LineNumber - 1)..($lines.Count - 1)] | ForEach-Object { Write-Host $_ } }
-          $failed = @($lines | Select-String -Pattern '^\s{2}\S+\s+Failed\s')
+          # A failed row can end right after "Failed" (no version or path), and
+          # "Next steps once all tools are working" must not count as success,
+          # so match the table status and the exact success sentence.
+          $failed = @($lines | Select-String -CaseSensitive -Pattern '^\s{2}\S+\s+Failed(\s|$)')
           if ($failed.Count -gt 0) {
             $failed | ForEach-Object { Write-Host "::error::$($_.Line.Trim())" }
             exit 1
           }
-          if (-not ($lines | Select-String -SimpleMatch 'All tools are working')) {
+          if (-not ($lines | Select-String -CaseSensitive -SimpleMatch 'All tools are working in THIS PowerShell window')) {
             Write-Host "::error::The fixer did not finish with 'All tools are working'"
             exit 1
           }
