@@ -28,7 +28,7 @@ concurrency:
 
 jobs:
   windows:
-    name: Windows (${{ matrix.os }}, ${{ matrix.start }})
+    name: Windows (${{ matrix.os }}, ${{ matrix.case }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     strategy:
@@ -39,13 +39,18 @@ jobs:
         #                 Windows 10 machines; this is the closest it offers)
         # windows-11-arm: Windows 11 on an ARM chip (like Snapdragon laptops)
         os: [windows-2025, windows-2022, windows-11-arm]
-        # no-node:  a laptop without Node.js - the fixer installs it
-        # old-node: like the student PC that failed in Nov 2026 - an old
-        #           Node.js and an old Claude Code from npm already there
-        start: [no-node]
+        # no-node:       a laptop without Node.js - the fixer installs it
+        # old-node:      like the student PC that failed in Nov 2026 - an old
+        #                Node.js and an old Claude Code from npm already there
+        # lost-download: npm skips Supabase's and Vercel's program files, like
+        #                a download that drops on busy Wi-Fi - the fixer must
+        #                notice and repair both by itself
+        case: [no-node]
         include:
           - os: windows-2025
-            start: old-node
+            case: old-node
+          - os: windows-2025
+            case: lost-download
     steps:
       - uses: actions/checkout@v7
 
@@ -127,7 +132,7 @@ jobs:
           $left = @(Get-Command node -All -ErrorAction SilentlyContinue | ForEach-Object Source)
           if ($left) { Write-Host "::warning::node is still on PATH: $($left -join ', ')" } else { Write-Host "Pre-installed Node.js removed." }
 
-          if ('${{ matrix.start }}' -eq 'old-node') {
+          if ('${{ matrix.case }}' -eq 'old-node') {
             # Node.js 20 from nodejs.org (what the Node MSI installer sets up:
             # node in Program Files, npm tools in %APPDATA%\npm on the user's
             # PATH) and Claude Code installed with npm months ago.
@@ -158,6 +163,7 @@ jobs:
         run: |
           set npm_config_prefix=
           set npm_config_cache=
+          if "${{ matrix.case }}"=="lost-download" set "npm_config_omit=optional"
           call script\run-fixer.bat < nul
 
       - name: Every tool is OK in the final table
@@ -180,6 +186,27 @@ jobs:
             Write-Host "::error::The fixer did not finish with 'All tools are working'"
             exit 1
           }
+
+      - name: The fixer repaired Supabase when its program file didn't arrive
+        if: matrix.case == 'lost-download'
+        shell: powershell
+        run: |
+          # The full run skipped npm's "optional" packages, so Supabase and
+          # Vercel installed without the program file they need (what a dropped
+          # download or antivirus leaves behind). Vercel's starter fetches its
+          # file by itself; Supabase's can't, so the fixer must notice and get
+          # Supabase's own download instead.
+          $ErrorActionPreference = 'Continue'
+          $log = Get-ChildItem "$env:TEMP\fix-vibecode-2*.log" | Sort-Object LastWriteTime | Select-Object -Last 1
+          $text = Get-Content $log.FullName -Raw
+          $bad = 0
+          if ($text -notmatch "npm says supabase is installed, but 'supabase' doesn't run") { Write-Host "::error::The fixer did not notice that Supabase didn't run"; $bad++ }
+          if ($text -notmatch 'Downloading Supabase CLI straight from Supabase') { Write-Host "::error::The fixer did not fall back to Supabase's own download"; $bad++ }
+          $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')
+          $sb = Get-Command supabase -ErrorAction SilentlyContinue
+          Write-Host "A new window finds supabase at: $($sb.Source)"
+          if ($sb.Source -ne "$env:LOCALAPPDATA\Programs\Supabase\supabase.exe") { Write-Host "::error::supabase should now come from Supabase's own download"; $bad++ }
+          exit $bad
 
       - name: Tools work in a brand-new window
         shell: powershell
@@ -308,7 +335,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: logs-${{ matrix.os }}-${{ matrix.start }}
+          name: logs-${{ matrix.os }}-${{ matrix.case }}
           path: logs/
           if-no-files-found: ignore
 

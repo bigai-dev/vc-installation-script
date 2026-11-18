@@ -116,14 +116,44 @@ function Info($msg)  { Write-Host "         $msg" -ForegroundColor Gray }
 # Runs "<tool> --version" and returns just the version number (e.g. "26.13.0"),
 # or $null when the tool runs but prints no version (an error message instead).
 # Callers treat $null as "broken" and mark the tool Failed instead of green.
+# A tool that crashes inside Node.js ends with "Node.js v26.13.1" - that is
+# Node's version, not the tool's, so it doesn't count. And a tool that can't
+# start can still mention a version in its error message (Vercel's starter
+# does), so it must also exit cleanly.
 function Get-ToolVersion([string]$Exe) {
+    $global:LASTEXITCODE = 0
     try {
-        $out = (& $Exe --version 2>&1 | ForEach-Object { "$_" }) -join "`n"
+        $out = (& $Exe --version 2>&1 | ForEach-Object { "$_" } |
+            Where-Object { $_ -notmatch '^\s*Node\.js v\d' }) -join "`n"
     } catch {
         return $null
     }
+    if ($global:LASTEXITCODE -ne 0) { return $null }
     if ($out -match '(\d+\.\d+(\.\d+)?)') { return $Matches[1] }
     return $null
+}
+
+# When a tool doesn't run, show what it printed, so the log says why.
+# npm's .ps1 starter can hide a crash message, so prefer the .cmd one next to it.
+function Show-ToolOutput([string]$Exe) {
+    $cmd = Get-Command $Exe -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $cmd) {
+        Info "'$Exe' is not on PATH."
+        return
+    }
+    $run = $cmd.Source
+    if ($run -like '*.ps1') {
+        $sibling = [IO.Path]::ChangeExtension($run, '.cmd')
+        if (Test-Path $sibling) { $run = $sibling }
+    }
+    try {
+        $out = @(& $run --version 2>&1 | ForEach-Object { "$_" } | Where-Object { $_.Trim() })
+    } catch {
+        $out = @("$($_.Exception.Message)")
+    }
+    if (-not $out) { $out = @('(nothing)') }
+    Info "'$Exe --version' printed:"
+    $out | Select-Object -First 8 | ForEach-Object { Info "  $_" }
 }
 
 # "26.13.0" -> 26 ; $null or garbage -> 0
@@ -498,6 +528,29 @@ Install-Python
 Step "Checking Node.js"
 Refresh-Path
 
+# The folder "npm install -g" puts commands in (supabase, vercel). On most PCs
+# that's %APPDATA%\npm, but npm can be set up to use another folder - so ask
+# npm, and make sure that folder is on PATH, or the tools install but can't be
+# found.
+function Get-NpmGlobalBin {
+    $prefix = ''
+    if (Get-Command npm.cmd -ErrorAction SilentlyContinue) {
+        $prefix = "$(& npm.cmd prefix -g 2>$null | Select-Object -Last 1)".Trim()
+    }
+    if (-not $prefix) { $prefix = "$env:APPDATA\npm" }
+    return $prefix.TrimEnd('\')
+}
+function Add-NpmGlobalToPath {
+    $npmGlobal = Get-NpmGlobalBin
+    $machine = @([Environment]::GetEnvironmentVariable('Path', 'Machine') -split ';' | ForEach-Object { $_.TrimEnd('\') })
+    if ($machine -contains $npmGlobal) { return }
+    if (-not (Test-Path $npmGlobal)) {
+        if ($DiagnoseOnly) { return }
+        New-Item -ItemType Directory -Path $npmGlobal -Force | Out-Null
+    }
+    Add-UserPathEntry $npmGlobal | Out-Null
+}
+
 function Install-Node {
     $nodeCmd = Get-Command node -ErrorAction SilentlyContinue
     $pathFixed = $false
@@ -568,11 +621,8 @@ function Install-Node {
             Set-Result -Tool 'node' -Status 'AlreadyInstalled' -Version $nvShow -Path $nodeCmd.Source
         }
 
-        # Always make sure npm-global folder is on PATH (it's where supabase/vercel land)
-        $npmGlobal = "$env:APPDATA\npm"
-        if (Test-Path $npmGlobal) {
-            Add-UserPathEntry $npmGlobal | Out-Null
-        }
+        # Always make sure npm's tools folder is on PATH (supabase/vercel land there)
+        Add-NpmGlobalToPath
         return
     }
 
@@ -594,10 +644,8 @@ function Install-Node {
         OK "Node v$nv installed: $($nodeCmd.Source)"
         Set-Result -Tool 'node' -Status 'Installed' -Version "v$nv" -Path $nodeCmd.Source
 
-        # Add npm-global folder
-        $npmGlobal = "$env:APPDATA\npm"
-        if (-not (Test-Path $npmGlobal)) { New-Item -ItemType Directory -Path $npmGlobal -Force | Out-Null }
-        Add-UserPathEntry $npmGlobal | Out-Null
+        # npm's tools folder (supabase/vercel land there)
+        Add-NpmGlobalToPath
     } else {
         Fail "Node install reported success but node.exe was not found or doesn't run"
         Set-Result -Tool 'node' -Status 'Failed' -Notes "Post-install check failed"
@@ -707,57 +755,148 @@ function Install-GitHubCLI {
 
 Install-GitHubCLI
 
+# ---------- Supabase CLI and Vercel CLI come from npm ----------
+# Both install as a small starter plus a large program file made for this PC
+# (about 150 MB, an "optional" npm package). If that file doesn't arrive - a
+# download that drops on busy Wi-Fi, or antivirus removing it - npm still
+# reports success and the command then fails (a student PC, Nov 2026). So
+# check that the command really runs, and if not, remove it and install it
+# once more.
+function Install-NpmTool([string]$Package, [string]$Command) {
+    for ($try = 1; $try -le 2; $try++) {
+        if ($try -eq 1) {
+            Info "Installing $Package via npm install -g $Package..."
+        } else {
+            Warn "$Command doesn't run yet - removing it and installing it once more..."
+            & npm.cmd uninstall -g $Package | Out-Host
+        }
+        # No 2>&1: PS 5.1 wraps native stderr in ErrorRecord, making npm warnings look
+        # like fatal PowerShell errors. Stderr still prints to console without it.
+        & npm.cmd install -g $Package | Out-Host
+        $code = $LASTEXITCODE
+        Add-NpmGlobalToPath
+        Refresh-Path
+        if ($code -ne 0) {
+            Fail "npm install -g $Package failed (exit code $code)"
+        } elseif ((Get-Command $Command -ErrorAction SilentlyContinue) -and (Get-ToolVersion $Command)) {
+            return $true
+        } else {
+            Fail "npm says $Package is installed, but '$Command' doesn't run."
+            Show-ToolOutput $Command
+        }
+    }
+    return $false
+}
+
 # ---------- Find and install Supabase CLI ----------
 Step "Checking Supabase CLI"
 Refresh-Path
 
+# Supabase's own Windows download - the same file "scoop install supabase"
+# uses - straight from Supabase's releases on GitHub, checked against the
+# checksums Supabase publishes with it. The backup when npm's copy won't run.
+$script:SupabaseDir = Join-Path $env:LOCALAPPDATA 'Programs\Supabase'
+function Install-SupabaseDirect {
+    $arch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64' -or $env:PROCESSOR_ARCHITEW6432 -eq 'ARM64') { 'arm64' } else { 'amd64' }
+    $file = "supabase_windows_$arch.tar.gz"
+    $base = 'https://github.com/supabase/cli/releases/latest/download'
+    $tar  = Join-Path $env:SystemRoot 'System32\tar.exe'
+    if (-not (Test-Path $tar)) {
+        Fail "Can't unpack Supabase's download: this Windows has no tar.exe (Windows 10 version 1803 or newer has it)."
+        return $false
+    }
+    $work = Join-Path $env:TEMP ('supabase-download-' + [guid]::NewGuid().ToString('N'))
+    $ProgressPreference = 'SilentlyContinue'   # PS 5.1 downloads crawl with the progress bar on
+    try {
+        New-Item -ItemType Directory -Path $work -Force | Out-Null
+        $archive = Join-Path $work $file
+        $sumsFile = Join-Path $work 'checksums.txt'
+        Info "Downloading Supabase CLI straight from Supabase ($base/$file)..."
+        Invoke-WebRequest -Uri "$base/$file" -OutFile $archive -UseBasicParsing
+        Invoke-WebRequest -Uri "$base/checksums.txt" -OutFile $sumsFile -UseBasicParsing
+        $hash = (Get-FileHash $archive -Algorithm SHA256).Hash
+        if ((Get-Content $sumsFile -Raw) -notmatch "(?im)^$hash\s+\S*_windows_$arch\.tar\.gz\s*$") {
+            Fail "Supabase's download doesn't match the checksum Supabase published - not installing it."
+            return $false
+        }
+        & $tar -xzf $archive -C $work
+        $exe = Get-ChildItem $work -Recurse -Filter 'supabase.exe' | Select-Object -First 1
+        if (-not $exe) {
+            Fail "Supabase's download didn't contain supabase.exe."
+            return $false
+        }
+        New-Item -ItemType Directory -Path $script:SupabaseDir -Force | Out-Null
+        Copy-Item $exe.FullName (Join-Path $script:SupabaseDir 'supabase.exe') -Force
+    } catch {
+        Fail "Could not download Supabase CLI: $($_.Exception.Message)"
+        return $false
+    } finally {
+        Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    Add-UserPathEntry $script:SupabaseDir | Out-Null
+    Refresh-Path
+    return [bool](Get-ToolVersion (Join-Path $script:SupabaseDir 'supabase.exe'))
+}
+
 function Install-SupabaseCLI {
     $sbCmd = Get-Command supabase -ErrorAction SilentlyContinue
+    if (-not $sbCmd -and (Test-Path (Join-Path $script:SupabaseDir 'supabase.exe'))) {
+        # Downloaded straight from Supabase by an earlier run - put it back on PATH.
+        Add-UserPathEntry $script:SupabaseDir | Out-Null
+        Refresh-Path
+        $sbCmd = Get-Command supabase -ErrorAction SilentlyContinue
+    }
     if ($sbCmd) {
         $sbv = Get-ToolVersion 'supabase'
         if ($sbv) {
             OK "supabase $sbv  ($($sbCmd.Source))"
             Set-Result -Tool 'supabase' -Status 'AlreadyInstalled' -Version $sbv -Path $sbCmd.Source
-        } else {
-            Fail "supabase is on PATH ($($sbCmd.Source)) but doesn't run."
-            Set-Result -Tool 'supabase' -Status 'Failed' -Path $sbCmd.Source -Notes "supabase doesn't run - reinstall it (npm install -g supabase), then re-run"
+            return
         }
-        return
-    }
-
-    if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
-        Warn "npm not available - cannot install Supabase CLI. Make sure Node was installed first."
-        Set-Result -Tool 'supabase' -Status 'Failed' -Notes "npm not available"
-        return
-    }
-
-    if ($DiagnoseOnly) {
+        Fail "supabase is on PATH ($($sbCmd.Source)) but doesn't run."
+        Show-ToolOutput 'supabase'
+        if ($DiagnoseOnly) {
+            Set-Result -Tool 'supabase' -Status 'Failed' -Path $sbCmd.Source -Notes "Doesn't run - a full run reinstalls it"
+            return
+        }
+        Info "Reinstalling it..."
+    } elseif ($DiagnoseOnly) {
         Warn "supabase not found. Would install via npm."
         Set-Result -Tool 'supabase' -Status 'Skipped' -Notes "Would install Supabase CLI via npm"
         return
     }
 
-    Info "Installing Supabase CLI via npm install -g supabase..."
-    # Supabase only lists Scoop for Windows, but a global npm install works with
-    # CLI v2.100+ (May 2026) and v3; older versions refused it outright. If this
-    # starts failing again, switch to Scoop.
-    # No 2>&1: PS 5.1 wraps native stderr in ErrorRecord, making npm warnings look
-    # like fatal PowerShell errors. Stderr still prints to console without it.
-    & npm.cmd install -g supabase | Out-Host
-    if ($LASTEXITCODE -ne 0) {
-        Fail "npm install -g supabase failed (exit code $LASTEXITCODE)"
-        Set-Result -Tool 'supabase' -Status 'Failed' -Notes "npm exit $LASTEXITCODE"
-        return
+    # Supabase lists Scoop for Windows, but a global npm install works with CLI
+    # v2.100+ (May 2026) and v3, so npm comes first and Supabase's own download
+    # is the backup.
+    $ok = $false
+    if (Get-Command npm.cmd -ErrorAction SilentlyContinue) {
+        $ok = Install-NpmTool -Package 'supabase' -Command 'supabase'
+        if (-not $ok) {
+            # Remove the broken npm copy, or it stays first on PATH and hides
+            # the working one.
+            Info "Removing npm's copy of Supabase CLI..."
+            & npm.cmd uninstall -g supabase | Out-Host
+            Refresh-Path
+        }
+    } else {
+        Warn "npm not available - getting Supabase CLI straight from Supabase instead."
     }
-    Refresh-Path
+    if (-not $ok) {
+        # Another copy (e.g. from Scoop) may work now that npm's is gone.
+        $ok = (Get-Command supabase -ErrorAction SilentlyContinue) -and (Get-ToolVersion 'supabase')
+        if (-not $ok) { $ok = Install-SupabaseDirect }
+    }
+
     $sbCmd = Get-Command supabase -ErrorAction SilentlyContinue
-    $sbv = if ($sbCmd) { Get-ToolVersion 'supabase' } else { $null }
+    $sbv = if ($ok -and $sbCmd) { Get-ToolVersion 'supabase' } else { $null }
     if ($sbv) {
-        OK "Supabase CLI installed: $sbv"
+        OK "Supabase CLI installed: $sbv  ($($sbCmd.Source))"
         Set-Result -Tool 'supabase' -Status 'Installed' -Version $sbv -Path $sbCmd.Source
     } else {
-        Fail "Supabase install reported success but supabase is not on PATH or doesn't run"
-        Set-Result -Tool 'supabase' -Status 'Failed' -Notes "Post-install check failed"
+        Fail "Supabase CLI still doesn't run - see the messages above."
+        Show-ToolOutput 'supabase'
+        Set-Result -Tool 'supabase' -Status 'Failed' -Notes "Doesn't run after installing - see the messages above"
     }
 }
 
@@ -800,41 +939,37 @@ function Install-VercelCLI {
         if ($vcv) {
             OK "vercel $vcv  ($($vcCmd.Source))"
             Set-Result -Tool 'vercel' -Status 'AlreadyInstalled' -Version $vcv -Path $vcCmd.Source
-        } else {
-            Fail "vercel is on PATH ($($vcCmd.Source)) but doesn't run."
-            Set-Result -Tool 'vercel' -Status 'Failed' -Path $vcCmd.Source -Notes "vercel doesn't run - reinstall it (npm install -g vercel), then re-run"
+            return
         }
-        return
-    }
-
-    if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
-        Warn "npm not available - cannot install Vercel CLI."
-        Set-Result -Tool 'vercel' -Status 'Failed' -Notes "npm not available"
-        return
-    }
-
-    if ($DiagnoseOnly) {
+        Fail "vercel is on PATH ($($vcCmd.Source)) but doesn't run."
+        Show-ToolOutput 'vercel'
+        if ($DiagnoseOnly) {
+            Set-Result -Tool 'vercel' -Status 'Failed' -Path $vcCmd.Source -Notes "Doesn't run - a full run reinstalls it"
+            return
+        }
+        Info "Reinstalling it..."
+    } elseif ($DiagnoseOnly) {
         Warn "vercel not found. Would install via npm."
         Set-Result -Tool 'vercel' -Status 'Skipped' -Notes "Would install Vercel CLI via npm"
         return
     }
 
-    Info "Installing Vercel CLI via npm install -g vercel..."
-    & npm.cmd install -g vercel | Out-Host
-    if ($LASTEXITCODE -ne 0) {
-        Fail "npm install -g vercel failed (exit code $LASTEXITCODE)"
-        Set-Result -Tool 'vercel' -Status 'Failed' -Notes "npm exit $LASTEXITCODE"
+    if (-not (Get-Command npm.cmd -ErrorAction SilentlyContinue)) {
+        Fail "npm not available - cannot install Vercel CLI. Make sure Node.js installed first."
+        Set-Result -Tool 'vercel' -Status 'Failed' -Notes "npm not available"
         return
     }
-    Refresh-Path
-    $vcCmd = Get-Command vercel -ErrorAction SilentlyContinue
-    $vcv = if ($vcCmd) { Get-ToolVersion 'vercel' } else { $null }
-    if ($vcv) {
-        OK "Vercel CLI installed: $vcv"
+
+    # When its program file is missing, Vercel's starter also downloads it by
+    # itself the first time it runs, so the check after installing is a retry too.
+    if (Install-NpmTool -Package 'vercel' -Command 'vercel') {
+        $vcCmd = Get-Command vercel -ErrorAction SilentlyContinue
+        $vcv = Get-ToolVersion 'vercel'
+        OK "Vercel CLI installed: $vcv  ($($vcCmd.Source))"
         Set-Result -Tool 'vercel' -Status 'Installed' -Version $vcv -Path $vcCmd.Source
     } else {
-        Fail "Vercel install reported success but vercel is not on PATH or doesn't run"
-        Set-Result -Tool 'vercel' -Status 'Failed' -Notes "Post-install check failed"
+        Fail "Vercel CLI still doesn't run - see the messages above."
+        Set-Result -Tool 'vercel' -Status 'Failed' -Notes "Doesn't run after installing - see the messages above"
     }
 }
 
