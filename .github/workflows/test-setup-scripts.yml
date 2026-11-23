@@ -432,6 +432,22 @@ jobs:
           fi
           grep -q 'All tools are working' "$log" || { echo "::error::The fixer did not finish with 'All tools are working'"; exit 1; }
 
+      - name: Supabase comes straight from Supabase, not Homebrew (no Xcode check)
+        run: |
+          # Homebrew's Supabase recipe has no ready-made package, so Homebrew
+          # checks Apple's developer tools first and stops with an Xcode error
+          # on Macs where they're out of date (workshop, Nov 2026). These cloud
+          # Macs have up-to-date tools, so only the route can be checked here.
+          log=$(ls -t /tmp/fix-vibecode-*.log 2>/dev/null | head -n 1)
+          if grep -n 'supabase/tap' "$log"; then
+            echo "::error::The fixer still installed Supabase with Homebrew"
+            exit 1
+          fi
+          grep -E '^  supabase +(Installed|AlreadyInstalled) .*/\.local/bin/supabase' "$log" || {
+            echo "::error::supabase should come from ~/.local/bin (Supabase's own download)"
+            exit 1
+          }
+
       - name: Every tool works in a brand-new Terminal window
         run: |
           # A clean login shell, like a student opening a new Terminal window.
