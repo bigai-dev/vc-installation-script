@@ -86,6 +86,7 @@ macOS: use `python3 --version` for the first line.
 | Red row with a `Fix:` line printed above the table | Do what the `Fix:` line says, then re-run. |
 | Red `node`: "Still v20…" (or another old version) | An older Node is in the way. Windows: Settings → Apps → uninstall **Node.js**, then re-run. Mac: ask the lead assistant. |
 | Mac: red `git` — "doesn't run" | Apple's developer tools broke (common after a macOS update). Run `xcode-select --install`, let it finish, re-run. |
+| Mac: Supabase stops with an **Xcode** / "Command Line Tools" error | Fixed in the script (Nov 2026) — Supabase doesn't need Xcode; Homebrew's Supabase recipe checked for it. The script now downloads Supabase straight from Supabase. Re-run the script. |
 | Red `claude` / `supabase` / `vercel` | Fresh window, re-run. |
 | Windows: red `supabase` / `vercel` — "Doesn't run after installing" | The script already retried by itself (and for Supabase also tried Supabase's own download, the file `scoop install supabase` uses — no need to run that by hand). Usually the big download (~150 MB each) dropped on busy Wi-Fi, or antivirus removed it: re-run on a steadier connection. If Avast/AVG shows a quarantined `supabase.exe` or `vercel.exe`, restore it first. The log shows what the tool printed. |
 | Mac: "This Mac runs macOS … need macOS 13.5 or newer" | System Settings → General → Software Update, install what's offered, re-run. If nothing newer is offered, the laptop is too old — borrow one. |
@@ -183,14 +184,15 @@ _macOS — Terminal. Block 1 installs Homebrew + the base tools, block 2 finishe
 ```bash
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 [ -x /opt/homebrew/bin/brew ] && echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile && eval "$(/opt/homebrew/bin/brew shellenv)"
-brew install python@3.14 node git gh supabase/tap/supabase
+brew install python@3.14 node git gh
 ```
 ```bash
+mkdir -p ~/.local/bin && curl -fsSL "https://github.com/supabase/cli/releases/latest/download/supabase_darwin_$([ "$(uname -m)" = arm64 ] && echo arm64 || echo amd64).tar.gz" | tar -xz -C ~/.local/bin supabase
 npm i -g vercel
 curl -fsSL https://claude.ai/install.sh | bash
 echo 'export PATH="$HOME/.local/bin:/opt/homebrew/opt/python@3.14/libexec/bin:$PATH"' >> ~/.zshrc
 ```
-> The last line makes `claude` and `python3` (3.14, not Apple's old 3.9) work in new windows.
+> The first line puts Supabase in `~/.local/bin` straight from Supabase — not `brew install supabase/tap/supabase`, which stops with an Xcode error on Macs whose developer tools are out of date. The last line makes `claude`, `supabase` and `python3` (3.14, not Apple's old 3.9) work in new windows.
 
 If antivirus also blocks the `npm i -g` line, tell it to **Allow** once (or pause protection for 10 min), then re-run that line.
 
@@ -202,7 +204,7 @@ If antivirus also blocks the `npm i -g` line, tell it to **Allow** once (or paus
 | Node.js LTS | <https://nodejs.org/en/download> |
 | Git | <https://git-scm.com/downloads> |
 | GitHub CLI | <https://cli.github.com/> |
-| Supabase | macOS `brew install supabase/tap/supabase` · Windows `npm i -g supabase` |
+| Supabase | macOS: `supabase_darwin_arm64.tar.gz` (Apple chip) or `supabase_darwin_amd64.tar.gz` (Intel) from <https://github.com/supabase/cli/releases/latest>, unzip `supabase` into `~/.local/bin` · Windows `npm i -g supabase` |
 | Vercel | `npm i -g vercel` |
 | Claude Code | macOS `curl -fsSL https://claude.ai/install.sh \| bash` · Windows `winget install Anthropic.ClaudeCode` |
 

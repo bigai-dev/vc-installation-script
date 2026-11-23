@@ -1067,63 +1067,56 @@ install_gh
 # ---------- Supabase CLI ----------
 step "Checking Supabase CLI"
 
+# Every Mac gets Supabase's own download from GitHub - the same file Supabase's
+# Homebrew recipe fetches - never "brew install supabase/tap/supabase". That
+# recipe has no ready-made Homebrew package, so Homebrew first checks Apple's
+# developer tools and stops with an Xcode / Command Line Tools error on Macs
+# where they are missing or older than macOS, which is common right after a
+# macOS update (workshop, Nov 2026). Supabase itself needs neither.
 install_supabase() {
+    local sbv sb_src was_broken=0
     if command -v supabase >/dev/null 2>&1; then
-        local sbv sb_src
         sbv=$(tool_version supabase)
         sb_src=$(command -v supabase)
         if [ -n "$sbv" ]; then
             ok "supabase $sbv  ($sb_src)"
             set_result supabase AlreadyInstalled "$sbv" "$sb_src"
-        else
-            fail "supabase is there ($sb_src) but doesn't run."
-            set_result supabase Failed "" "$sb_src" "supabase doesn't run - reinstall it, then re-run"
+            return
         fi
+        fail "supabase is there ($sb_src) but doesn't run."
+        if [ "$DIAGNOSE_ONLY" -eq 1 ]; then
+            set_result supabase Failed "" "$sb_src" "Doesn't run - a full run downloads a fresh copy"
+            return
+        fi
+        # A broken copy from an older Homebrew install would stay first on PATH
+        # in new windows, so take it away first.
+        if [ -n "${BREW_BIN:-}" ] && "$BREW_BIN" list --formula supabase >/dev/null 2>&1; then
+            info "Removing Homebrew's broken copy of Supabase CLI..."
+            "$BREW_BIN" uninstall supabase || true
+        fi
+        info "Downloading a fresh copy from Supabase..."
+        was_broken=1
+    elif [ "$DIAGNOSE_ONLY" -eq 1 ]; then
+        warn "supabase not found. Would download it from Supabase (GitHub)."
+        set_result supabase Skipped "" "" "Would download Supabase CLI from GitHub"
         return
     fi
-    if [ "$DIAGNOSE_ONLY" -eq 1 ]; then
-        if [ "$INSTALL_ROUTE" = direct ]; then
-            warn "supabase not found. Would download it from GitHub."
-            set_result supabase Skipped "" "" "Would download Supabase CLI from GitHub"
-        else
-            warn "supabase not found. Would install via brew (supabase/tap/supabase)."
-            set_result supabase Skipped "" "" "Would install via brew tap"
+    if direct_install_supabase; then
+        if [ "$was_broken" -eq 1 ]; then
+            # Put the fresh copy ahead of any other broken one.
+            ensure_path_line_in_rc "$LOCAL_BIN" first || true
+            hash -r
         fi
-        return
-    fi
-    if [ "$INSTALL_ROUTE" = direct ]; then
-        local dsbv
-        if direct_install_supabase; then
-            dsbv=$(tool_version supabase)
-            if [ -n "$dsbv" ]; then
-                ok "Supabase CLI installed: $dsbv"
-                set_result supabase Installed "$dsbv" "$(command -v supabase)"
-            else
-                fail "Supabase CLI downloaded, but it doesn't run."
-                set_result supabase Failed "" "$(command -v supabase 2>/dev/null || true)" "Downloaded, but supabase --version fails"
-            fi
-        else
-            set_result supabase Failed "" "" "Supabase CLI download failed - check the internet, then re-run"
-        fi
-        return
-    fi
-    info "Installing Supabase CLI via brew tap..."
-    # Supabase's own recommended macOS method (their tap is "always up to date";
-    # npm is only supported as a per-project install, not a global one).
-    if "$BREW_BIN" install supabase/tap/supabase; then
-        hash -r
-        local sbv
         sbv=$(tool_version supabase)
         if [ -n "$sbv" ]; then
             ok "Supabase CLI installed: $sbv"
             set_result supabase Installed "$sbv" "$(command -v supabase)"
         else
-            fail "brew installed supabase, but it doesn't run."
-            set_result supabase Failed "" "$(command -v supabase 2>/dev/null || true)" "Installed, but supabase --version fails"
+            fail "Supabase CLI downloaded, but it doesn't run."
+            set_result supabase Failed "" "$(command -v supabase 2>/dev/null || true)" "Downloaded, but supabase --version fails"
         fi
     else
-        fail "brew install supabase/tap/supabase failed."
-        set_result supabase Failed "" "" "brew install failed"
+        set_result supabase Failed "" "" "Supabase CLI download failed - check the internet, then re-run"
     fi
 }
 
