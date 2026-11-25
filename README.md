@@ -85,7 +85,8 @@ macOS: use `python3 --version` for the first line.
 | "command not found" in smoke test | Close the window, open a fresh one. |
 | Red row with a `Fix:` line printed above the table | Do what the `Fix:` line says, then re-run. |
 | Red `node`: "Still v20…" (or another old version) | An older Node is in the way. Windows: Settings → Apps → uninstall **Node.js**, then re-run. Mac: ask the lead assistant. |
-| Mac: red `git` — "doesn't run" | Apple's developer tools broke (common after a macOS update). Run `xcode-select --install`, let it finish, re-run. |
+| Mac: asks for **Xcode** / "command line developer tools" | Nobody needs the full Xcode app. The script installs Apple's small command line tools by itself (Nov 2026) — type the Mac password when asked and wait 5–15 min. Only if Apple's window still pops up: click **Install** (never **Get Xcode**), then press Return in Terminal. |
+| Mac: red `git` — "doesn't run" | Apple's command line tools broke (common after a macOS update). Re-run the script — it repairs them by itself now. |
 | Mac: Supabase stops with an **Xcode** / "Command Line Tools" error | Fixed in the script (Nov 2026) — Supabase doesn't need Xcode; Homebrew's Supabase recipe checked for it. The script now downloads Supabase straight from Supabase. Re-run the script. |
 | Red `claude` / `supabase` / `vercel` | Fresh window, re-run. |
 | Windows: red `supabase` / `vercel` — "Doesn't run after installing" | The script already retried by itself (and for Supabase also tried Supabase's own download, the file `scoop install supabase` uses — no need to run that by hand). Usually the big download (~150 MB each) dropped on busy Wi-Fi, or antivirus removed it: re-run on a steadier connection. If Avast/AVG shows a quarantined `supabase.exe` or `vercel.exe`, restore it first. The log shows what the tool printed. |
