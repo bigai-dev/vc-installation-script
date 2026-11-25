@@ -23,7 +23,8 @@
 #  It also:
 #    - Stops early, with a plain message, on Macs too old for the tools
 #      (they need macOS 13.5 or newer)
-#    - Bootstraps Xcode Command Line Tools if missing (needed for git, brew)
+#    - Installs or repairs Apple's command line tools if needed (for git, brew),
+#      without Apple's pop-up - never the full Xcode app
 #    - Bootstraps Homebrew if missing - on Apple-chip Macs with macOS 15+.
 #      Intel Macs and older macOS skip Homebrew (it no longer has ready-made
 #      packages for them) and download each tool's official version directly.
@@ -558,21 +559,93 @@ if [ "$FORCE_DIRECT" -eq 1 ] || [ "$MAC_ARCH" != "arm64" ] || ! version_at_least
     fi
 fi
 
-# ---------- Preflight: Xcode Command Line Tools (needed for brew, git) ----------
-step "Checking Xcode Command Line Tools"
-if xcode-select -p >/dev/null 2>&1; then
-    ok "Xcode Command Line Tools present: $(xcode-select -p)"
+# ---------- Preflight: Apple's command line tools (needed for git and brew) ----------
+# Apple's "Command Line Tools" - a small part of Xcode, NOT the full Xcode app.
+# Apple's own pop-up for them (xcode-select --install) offers a "Get Xcode"
+# button that sends students to a huge download, and the script then had to be
+# run again; tools broken by a macOS update needed the same by hand (workshop,
+# Nov 2026). So install or repair them without the pop-up, the way Homebrew's
+# own installer does: ask Software Update for the package and install it with
+# softwareupdate. The pop-up is only the fallback.
+CLT_DIR=/Library/Developer/CommandLineTools
+
+# True when the tools work: the selected developer folder has git, and Apple's
+# git runs (which also fails when a full Xcode's licence was never accepted).
+# /usr/bin/git only shows Apple's pop-up when no tools are selected at all,
+# and that case returns before it runs.
+clt_works() {
+    local dev
+    dev=$(xcode-select -p 2>/dev/null) || return 1
+    [ -n "$dev" ] && [ -x "$dev/usr/bin/git" ] || return 1
+    /usr/bin/git --version >/dev/null 2>&1
+}
+
+# Ask Software Update for the newest Command Line Tools and install them.
+install_clt_quietly() {
+    # This placeholder file makes softwareupdate list the Command Line Tools.
+    local placeholder=/tmp/.com.apple.dt.CommandLineTools.installondemand.in-progress label
+    info "Type your Mac password if asked (nothing shows while you type)."
+    sudo /usr/bin/touch "$placeholder" || return 1
+    info "Looking up Apple's command line tools in Software Update (about a minute)..."
+    label=$(/usr/sbin/softwareupdate -l 2>/dev/null |
+        grep -B 1 -E 'Command Line Tools' |
+        awk -F'*' '/^ *\*/ {print $2}' |
+        sed -e 's/^ *Label: //' -e 's/^ *//' |
+        sort -V | tail -n 1)
+    if [ -z "$label" ]; then
+        sudo /bin/rm -f "$placeholder"
+        warn "Software Update didn't offer the command line tools."
+        return 1
+    fi
+    info "Installing \"$label\" - about 1 GB, usually 5-15 minutes. Please wait..."
+    if ! sudo /usr/sbin/softwareupdate -i "$label"; then
+        sudo /bin/rm -f "$placeholder"
+        return 1
+    fi
+    sudo /bin/rm -f "$placeholder"
+    sudo /usr/bin/xcode-select --switch "$CLT_DIR" || true
+    clt_works
+}
+
+step "Checking Apple's command line tools (not the full Xcode app)"
+if clt_works; then
+    ok "Apple's command line tools work: $(xcode-select -p)"
+elif [ "$DIAGNOSE_ONLY" -eq 1 ]; then
+    warn "Apple's command line tools are missing or broken. Would install them (not the full Xcode app)."
 else
-    if [ "$DIAGNOSE_ONLY" -eq 1 ]; then
-        warn "Xcode Command Line Tools missing. Would run: xcode-select --install"
+    clt_dev=$(xcode-select -p 2>/dev/null || true)
+    if [ -n "$clt_dev" ]; then
+        warn "Apple's command line tools at $clt_dev don't work (common after a macOS update)."
     else
-        warn "Xcode Command Line Tools missing - launching installer."
-        info "A GUI dialog will appear. Click 'Install' and wait for it to finish."
-        info "When it's done, re-run this script."
-        xcode-select --install || true
-        echo ""
-        say "  Re-run this script after the CLT installer finishes." "$C_YELLOW"
-        exit 2
+        warn "Apple's command line tools are missing."
+    fi
+    info "Installing them now - this is NOT the full Xcode app."
+    # Working tools next to a full Xcode that doesn't run (e.g. its licence was
+    # never accepted): just use the tools.
+    if [ "$clt_dev" != "$CLT_DIR" ] && [ -x "$CLT_DIR/usr/bin/git" ] &&
+       "$CLT_DIR/usr/bin/git" --version >/dev/null 2>&1; then
+        sudo /usr/bin/xcode-select --switch "$CLT_DIR" || true
+    fi
+    if clt_works || install_clt_quietly; then
+        ok "Apple's command line tools work: $(xcode-select -p)"
+    else
+        # Fallback: Apple's own pop-up. Wait for it here, so nobody has to
+        # start the script again.
+        warn "Couldn't install them automatically - opening Apple's installer instead."
+        say "  In the window that appears, click 'Install' - NOT 'Get Xcode' - then 'Agree'." "$C_YELLOW"
+        xcode-select --install >/dev/null 2>&1 || true
+        if [ -t 0 ]; then
+            printf '%s' "  When the installer says it's done, press Return here to continue... "
+            read -r _ || true
+            sudo /usr/bin/xcode-select --switch "$CLT_DIR" 2>/dev/null || true
+        fi
+        if clt_works; then
+            ok "Apple's command line tools work: $(xcode-select -p)"
+        else
+            fail "Apple's command line tools still aren't working."
+            say "  When Apple's installer finishes, run the same setup line again." "$C_YELLOW"
+            exit 2
+        fi
     fi
 fi
 
@@ -945,10 +1018,9 @@ install_git() {
         if [ -z "$gv" ]; then
             # Typical after a macOS upgrade: Apple's git can't find its developer
             # tools and prints an "xcrun: error" instead of a version.
-            fail "git is there ($git_src) but doesn't run - Apple's developer tools need repairing."
-            info "Fix: run  xcode-select --install  then re-run this script."
-            info "(If it says the tools are already installed, ask a workshop assistant.)"
-            set_result git Failed "" "$git_src" "git doesn't run - run xcode-select --install, then re-run"
+            fail "git is there ($git_src) but doesn't run - Apple's command line tools need repairing."
+            info "Fix: run this setup again - it repairs them. If it still fails, ask a workshop assistant."
+            set_result git Failed "" "$git_src" "git doesn't run - run the setup again (it repairs Apple's tools)"
             return
         fi
         ok "git $gv  ($git_src)"
@@ -956,9 +1028,9 @@ install_git() {
     else
         if [ "$INSTALL_ROUTE" = direct ]; then
             # On this route git comes from Apple's developer tools (checked above).
-            fail "git not found - it comes with Apple's developer tools."
-            info "Fix: run  xcode-select --install  then re-run this script."
-            set_result git Failed "" "" "Run xcode-select --install, then re-run"
+            fail "git not found - it comes with Apple's command line tools."
+            info "Fix: run this setup again - it installs them. If it still fails, ask a workshop assistant."
+            set_result git Failed "" "" "Run the setup again (it installs Apple's tools)"
             return
         fi
         if [ "$DIAGNOSE_ONLY" -eq 1 ]; then

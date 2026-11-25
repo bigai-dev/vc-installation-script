@@ -349,7 +349,7 @@ jobs:
           if-no-files-found: ignore
 
   mac:
-    name: Mac (${{ matrix.os }}, ${{ matrix.route }})
+    name: Mac (${{ matrix.os }}, ${{ matrix.route }}${{ matrix.clt && format(', {0} developer tools', matrix.clt) || '' }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     strategy:
@@ -373,9 +373,21 @@ jobs:
           - os: macos-15-intel    # Intel Mac: picks the direct route by itself
             route: direct downloads
             fresh: true
+          # Apple's command line tools (needed for git) taken away, like a
+          # brand-new Mac, or broken, like after a macOS update. The fixer must
+          # install them itself, without Apple's pop-up (workshop, Nov 2026).
+          - os: macos-15
+            route: Homebrew
+            clt: missing
+          - os: macos-15
+            route: Homebrew
+            clt: broken
     env:
       FRESH: ${{ matrix.fresh }}
       FLAGS: ${{ matrix.flags }}
+      CLT: ${{ matrix.clt }}
+      # The paste line students use, pointed at the version being tested.
+      SCRIPT_URL: https://raw.githubusercontent.com/${{ github.repository }}/${{ github.event.pull_request.head.sha || github.sha }}/script/fix-vibecode-mac.sh
     steps:
       - uses: actions/checkout@v7
 
@@ -401,6 +413,29 @@ jobs:
             printf '  %-9s %s\n' "$t" "$(PATH=/usr/local/bin:/usr/bin:/bin command -v "$t" || echo '-')"
           done
 
+      - name: Take away or break Apple's command line tools (developer-tools jobs)
+        if: matrix.clt
+        run: |
+          echo "Before: $(xcode-select -p 2>&1)"
+          # Hide every Xcode app (renamed on the same disk, so it's instant).
+          for x in /Applications/Xcode*.app; do
+            if [ -d "$x" ]; then sudo mv "$x" "${x%.app}.hidden"; fi
+          done
+          if [ "$CLT" = "missing" ]; then
+            # No developer tools at all, like a brand-new Mac.
+            if [ -d /Library/Developer/CommandLineTools ]; then
+              sudo mv /Library/Developer/CommandLineTools /Library/Developer/CommandLineTools.hidden
+            fi
+            sudo xcode-select --reset 2>/dev/null || true
+          else
+            # Still selected but broken, like after a macOS update.
+            sudo xcode-select --switch /Library/Developer/CommandLineTools
+            sudo mv /Library/Developer/CommandLineTools/usr/bin/git /Library/Developer/CommandLineTools/usr/bin/git.hidden
+          fi
+          echo "After:  $(xcode-select -p 2>&1)"
+          d=$(xcode-select -p 2>/dev/null || true)
+          if [ -n "$d" ] && [ -x "$d/usr/bin/git" ]; then echo "::error::The developer tools still work"; exit 1; fi
+
       - name: Check-only run (--diagnose-only)
         run: |
           if [ "$FRESH" = "true" ]; then
@@ -411,14 +446,18 @@ jobs:
             /bin/bash script/fix-vibecode-mac.sh $FLAGS --diagnose-only
           fi
 
-      - name: Full run
+      - name: Full run - the exact line students paste
         timeout-minutes: 45
         run: |
+          # Same command as the README, but pointed at the commit being tested
+          # instead of main. First make sure that link serves this very file.
+          curl -fsSL "$SCRIPT_URL" | cmp - script/fix-vibecode-mac.sh || { echo "::error::$SCRIPT_URL is not this version of the script"; exit 1; }
+          echo "Running: /bin/bash -c \"\$(curl -fsSL $SCRIPT_URL)\" $FLAGS"
           if [ "$FRESH" = "true" ]; then
             env -i HOME="$HOME" USER="$USER" LOGNAME="$USER" SHELL="$SHELL" TERM=dumb \
-              PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin /bin/bash script/fix-vibecode-mac.sh $FLAGS
+              PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin /bin/bash -c "$(curl -fsSL "$SCRIPT_URL")" bash $FLAGS
           else
-            /bin/bash script/fix-vibecode-mac.sh $FLAGS
+            /bin/bash -c "$(curl -fsSL "$SCRIPT_URL")" bash $FLAGS
           fi
 
       - name: Every tool is OK in the final table
@@ -431,6 +470,15 @@ jobs:
             exit 1
           fi
           grep -q 'All tools are working' "$log" || { echo "::error::The fixer did not finish with 'All tools are working'"; exit 1; }
+
+      - name: Apple's command line tools were installed without the pop-up
+        if: matrix.clt
+        run: |
+          log=$(ls -t /tmp/fix-vibecode-*.log 2>/dev/null | head -n 1)
+          sed -n "/Checking Apple's command line tools/,/==> Checking Homebrew/p" "$log"
+          if grep -q "Get Xcode" "$log"; then echo "::error::The fixer fell back to Apple's pop-up"; exit 1; fi
+          [ "$(xcode-select -p)" = /Library/Developer/CommandLineTools ] || { echo "::error::The command line tools are not selected"; exit 1; }
+          /usr/bin/git --version || { echo "::error::Apple's git doesn't run"; exit 1; }
 
       - name: Supabase comes straight from Supabase, not Homebrew (no Xcode check)
         run: |
@@ -469,6 +517,6 @@ jobs:
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: logs-${{ matrix.os }}
+          name: logs-${{ matrix.os }}-mac-${{ strategy.job-index }}
           path: logs/
           if-no-files-found: ignore
